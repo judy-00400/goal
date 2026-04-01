@@ -1,0 +1,3105 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#faf9f7" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="目標規劃" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="apple-touch-icon" href="/icon.png" />
+  <link rel="icon" type="image/png" href="/icon.png" />
+  <title>目標規劃</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #faf9f7; }
+    #root { min-height: 100vh; }
+    .fb-loading {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; background: #faf9f7; gap: 16px;
+    }
+    .fb-loading p { font-family: "DM Sans", sans-serif; color: #aaa; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+
+  <!-- Firebase compat -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyC5UU9dASJx5ZRhW52EOir49ikrOSvhB9w",
+      authDomain: "goal-planner-c0d14.firebaseapp.com",
+      projectId: "goal-planner-c0d14",
+      storageBucket: "goal-planner-c0d14.firebasestorage.app",
+      messagingSenderId: "897978091056",
+      appId: "1:897978091056:web:46f067db98893bb1220ff5"
+    };
+    firebase.initializeApp(firebaseConfig);
+    window._db = firebase.firestore();
+    window._auth = firebase.auth();
+  </script>
+
+  <!-- Babel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef } = React;
+    const db = window._db;
+    const auth = window._auth;
+
+    // ─── Firebase helpers ─────────────────────────────────────────────────────
+    async function loadGoalsFromFirestore(uid) {
+      try {
+        const snap = await db.collection("users").doc(uid).collection("data").doc("goals").get();
+        if (snap.exists) {
+          const data = snap.data();
+          if (Array.isArray(data.goals) && data.goals.length > 0) return data.goals;
+        }
+      } catch(e) { console.error("Load error:", e.code, e.message); }
+      return null;
+    }
+
+    async function saveGoalsToFirestore(uid, goals) {
+      try {
+        await db.collection("users").doc(uid).collection("data").doc("goals").set({
+          goals, updatedAt: new Date().toISOString()
+        });
+      } catch(e) { console.error("Save error:", e.code, e.message); }
+    }
+
+    // ─── Login Screen ─────────────────────────────────────────────────────────
+    function LoginScreen({ onLogin, error }) {
+      const [password, setPassword] = useState("");
+      const [loading, setLoading] = useState(false);
+      const handleSubmit = async () => {
+        if (!password.trim()) return;
+        setLoading(true);
+        await onLogin(password);
+        setLoading(false);
+      };
+      return (
+        <div className="fb-loading">
+          <p style={{ fontSize: 48, marginBottom: 8 }}>🎯</p>
+          <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 24, color: "#1e1c1a", fontWeight: 400, marginBottom: 4 }}>目標規劃</p>
+          <p style={{ color: "#aaa", fontSize: 13, marginBottom: 24 }}>請輸入密碼登入</p>
+          <div style={{ width: "100%", maxWidth: 320, padding: "0 24px", boxSizing: "border-box" }}>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              placeholder="密碼"
+              style={{ width: "100%", padding: "14px 16px", borderRadius: 14,
+                border: "1.5px solid #e8e4de", fontSize: 16, fontFamily: "DM Sans",
+                outline: "none", marginBottom: 12, boxSizing: "border-box",
+                background: "#fff", color: "#1e1c1a" }} />
+            <button onClick={handleSubmit} disabled={loading || !password.trim()} style={{
+              width: "100%", padding: "14px", borderRadius: 14, border: "none",
+              background: password.trim() ? "#1e1c1a" : "#e8e4de", color: "#fff",
+              fontSize: 15, fontFamily: "DM Sans", fontWeight: 600,
+              cursor: password.trim() ? "pointer" : "default" }}>
+              {loading ? "登入中..." : "登入"}
+            </button>
+            {error && <p style={{ color: "#e05555", fontSize: 13, marginTop: 12, textAlign: "center" }}>{error}</p>}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Loading Screen ───────────────────────────────────────────────────────
+    function LoadingScreen({ message }) {
+      return (
+        <div className="fb-loading">
+          <p style={{ fontSize: 40 }}>🎯</p>
+          <p>{message || "載入中..."}</p>
+        </div>
+      );
+    }
+
+
+
+// ─── Fonts ────────────────────────────────────────────────────────────────────
+// Loaded via useEffect in App to avoid top-level DOM access issues
+
+// ─── Utils ────────────────────────────────────────────────────────────────────
+function genId() { return Math.random().toString(36).slice(2, 9); }
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+function todayStr() {
+  return new Date().toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+}
+function dateLabel(key) {
+  const d = new Date(key + "T00:00:00");
+  return d.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+}
+function shortDate(key) {
+  const d = new Date(key + "T00:00:00");
+  return d.toLocaleDateString("zh-TW", { month: "long", day: "numeric" });
+}
+
+// ─── Frequency helpers ────────────────────────────────────────────────────────
+// freq: { type: "daily" | "alternate" | "weekly_specific" | "weekly_once" | "monthly_once", days?: [0-6], startDate?: string }
+function shouldShowToday(freq) {
+  if (!freq || freq.type === "daily") return true;
+  const today = new Date();
+  const dow = today.getDay(); // 0=Sun
+  const todayK = todayKey();
+
+  if (freq.type === "alternate") {
+    if (!freq.startDate) return true;
+    const start = new Date(freq.startDate + "T00:00:00");
+    const diff = Math.round((today - start) / 86400000);
+    return diff % 2 === 0;
+  }
+  if (freq.type === "weekly_specific") {
+    return (freq.days || []).includes(dow);
+  }
+  if (freq.type === "weekly_once") {
+    return true; // 週一到週日都顯示，週一重置
+  }
+  if (freq.type === "monthly_once") {
+    return true;
+  }
+  if (freq.type === "specific_dates") {
+    return (freq.dates || []).includes(todayK);
+  }
+  return true;
+}
+
+function freqLabel(freq) {
+  if (!freq || freq.type === "daily") return "每天";
+  if (freq.type === "alternate") return "每隔一天";
+  if (freq.type === "weekly_specific") {
+    const names = ["日", "一", "二", "三", "四", "五", "六"];
+    return "週" + (freq.days || []).map(d => names[d]).join("、");
+  }
+  if (freq.type === "weekly_once") return "每週一次";
+  if (freq.type === "monthly_once") return "每月一次";
+  if (freq.type === "specific_dates") {
+    const ds = freq.dates || [];
+    if (ds.length === 0) return "指定日期（未選）";
+    if (ds.length <= 3) return ds.map(d => shortDate(d)).join("、");
+    return `指定 ${ds.length} 個日期`;
+  }
+  return "每天";
+}
+
+// ─── Reward helpers ───────────────────────────────────────────────────────────
+// Count distinct days where any action under a subgoal was checked
+function getSubgoalActiveDays(sub) {
+  const days = new Set();
+  (sub.actions || []).forEach(action => {
+    (action.logs || []).forEach(log => {
+      if (log.type === "check") days.add(log.date);
+    });
+  });
+  return days.size;
+}
+
+// Check if a reward milestone was just crossed (oldDays → newDays)
+function checkNewlyUnlocked(rewards, oldDays, newDays) {
+  if (!rewards || newDays <= oldDays) return null;
+  return (rewards || []).find(r =>
+    r.type === "milestone" && r.threshold > oldDays && r.threshold <= newDays && !r.unlockedAt
+  ) || null;
+}
+
+
+const STORAGE_KEY = "goalplanner_v1";
+const CHECKIN_KEY = "goalplanner_checkin";
+
+function loadGoals() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return null;
+}
+
+function saveGoals(goals) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(goals)); } catch (e) {}
+}
+
+// Reset daily `done` flags if it's a new day
+function applyDailyReset(goals) {
+  try {
+    const last = localStorage.getItem(CHECKIN_KEY);
+    const today = todayKey();
+    if (last === today) return goals; // already reset today
+    localStorage.setItem(CHECKIN_KEY, today);
+    const todayDate = new Date();
+    const dow = todayDate.getDay();
+    const dayOfMonth = todayDate.getDate();
+    return goals.map(g => ({
+      ...g,
+      branches: g.branches.map(b => ({
+        ...b,
+        subgoals: b.subgoals.map(s => ({
+          ...s,
+          actions: s.actions.map(a => {
+            const freq = a.freq;
+            if (!freq) return { ...a, done: false };
+            if (freq.type === "weekly_once") return dow === 1 ? { ...a, done: false } : a;
+            if (freq.type === "monthly_once") return dayOfMonth === 1 ? { ...a, done: false } : a;
+            return { ...a, done: false };
+          })
+        }))
+      }))
+    }));
+  } catch (e) { return goals; }
+}
+
+// ─── Initial demo data ────────────────────────────────────────────────────────
+const INITIAL_GOALS = [
+  {
+    id: "g1", title: "穩定輸出高價值", color: "#8B9CC2", emoji: "✍️", achieved: false, note: "",
+    branches: [
+      {
+        id: "g1b1", title: "內容能力", achieved: false, note: "",
+        subgoals: [{
+          id: "g1b1s1", title: "閱讀思辨輸出", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g1b1s1a1", title: "閱讀1篇文章", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+          ]
+        }]
+      },
+      {
+        id: "g1b2", title: "專業能力", achieved: false, note: "",
+        subgoals: [{
+          id: "g1b2s1", title: "英語口說", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g1b2s1a1", title: "Speak/Elsa：跟讀＋錄音＋發音回饋（10分鐘）", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+          ]
+        }]
+      },
+    ]
+  },
+  {
+    id: "g2", title: "掌控生活節奏", color: "#7C9E8A", emoji: "🌿", achieved: false, note: "",
+    branches: [
+      {
+        id: "g2b1", title: "健康管理", achieved: false, note: "",
+        subgoals: [
+          {
+            id: "g2b1s1", title: "睡眠", achieved: false, note: "", rewards: [],
+            actions: [
+              { id: "g2b1s1a1", title: "07:00 起床，23:00 前就寢", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+            ]
+          },
+          {
+            id: "g2b1s2", title: "飲食", achieved: false, note: "", rewards: [],
+            actions: [
+              { id: "g2b1s2a1", title: "今日喝水達 2000cc", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+              { id: "g2b1s2a2", title: "本周含糖飲料、宵夜、炸物少於1次", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+            ]
+          },
+          {
+            id: "g2b1s3", title: "運動", achieved: false,
+            note: "跪姿大腿前側拉伸 (每側60秒)\n手臂後側拉伸 (每側30秒)\n下犬式 (30-60秒)\n貓牛式 + 變體 (10次)\n牆面拉伸 (左右各30秒)\n死蟲式 (12-15次 x 3組)\nY-W 伸展 (15次 x 3組)\n靠牆天使 (10次 x 2組)\n深蹲 (15-20次 x 2組)\n臀橋 (20次 x 2組)\n鴿式拉伸 (每側1分鐘)",
+            rewards: [],
+            actions: [
+              { id: "g2b1s3a1", title: "完成運動訓練", type: "check", done: false, achieved: false, logs: [], freq: { type: "weekly_specific", days: [1, 4, 6], startDate: todayKey() } },
+            ]
+          },
+        ]
+      },
+      {
+        id: "g2b2", title: "生活節奏感", achieved: false, note: "",
+        subgoals: [{
+          id: "g2b2s1", title: "整理環境", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g2b2s1a1", title: "整理一個區域", type: "check", done: false, achieved: false, logs: [], freq: { type: "weekly_specific", days: [6], startDate: todayKey() } },
+          ]
+        }]
+      },
+      {
+        id: "g2b3", title: "自我管理", achieved: false, note: "",
+        subgoals: [{
+          id: "g2b3s1", title: "時間規劃", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g2b3s1a1", title: "規劃下週行程＋本週To-Do回顧", type: "check", done: false, achieved: false, logs: [], freq: { type: "weekly_specific", days: [0], startDate: todayKey() } },
+          ]
+        }]
+      },
+    ]
+  },
+  {
+    id: "g3", title: "財務自由", color: "#C2A87C", emoji: "💰", achieved: false, note: "",
+    branches: [
+      {
+        id: "g3b1", title: "財務行動力", achieved: false, note: "",
+        subgoals: [{
+          id: "g3b1s1", title: "收支管理", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g3b1s1a1", title: "每月收支盤點（週日進行）", type: "check", done: false, achieved: false, logs: [], freq: { type: "monthly_once", startDate: todayKey() } },
+          ]
+        }]
+      },
+      {
+        id: "g3b2", title: "投資能力", achieved: false, note: "",
+        subgoals: [{
+          id: "g3b2s1", title: "財務盤點", achieved: false,
+          note: "列出所有收入來源與金額\n列出每月固定支出與分類\n列出所有資產（現金、保單、基金、股票等）\n列出負債與義務\n彙整成財務總表\n用4%法則試算財務自由目標金額",
+          rewards: [],
+          actions: [
+            { id: "g3b2s1a1", title: "完成財務盤點", type: "check", done: false, achieved: false, logs: [], freq: { type: "specific_dates", dates: ["2026-04-03"], startDate: todayKey() } },
+          ]
+        }]
+      },
+      {
+        id: "g3b3", title: "財務知識", achieved: false, note: "",
+        subgoals: [{
+          id: "g3b3s1", title: "投資基礎知識（含財報＋商業認知）", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g3b3s1a1", title: "1概念或1家公司財報", type: "note", done: false, achieved: false, logs: [], freq: { type: "weekly_once", startDate: todayKey() } },
+            { id: "g3b3s1a2", title: "1個產業分析", type: "note", done: false, achieved: false, logs: [], freq: { type: "monthly_once", startDate: todayKey() } },
+          ]
+        }]
+      },
+    ]
+  },
+  {
+    id: "g4", title: "心態支援", color: "#C27C8B", emoji: "🌸", achieved: false, note: "",
+    branches: [
+      {
+        id: "g4b1", title: "情緒管理", achieved: false, note: "",
+        subgoals: [{
+          id: "g4b1s1", title: "內在整理", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g4b1s1a1", title: "起床後冥想 10分鐘", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+            { id: "g4b1s1a2", title: "今日情緒/信念觀察：有情緒時停下來呼吸", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+            { id: "g4b1s1a3", title: "睡前：寫下3件快樂或感謝的事/反思", type: "note", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+          ]
+        }]
+      },
+      {
+        id: "g4b2", title: "氣場穩定", achieved: false, note: "",
+        subgoals: [{
+          id: "g4b2s1", title: "日常對話語氣（說話技巧）", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g4b2s1a1", title: "日常覺知", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+          ]
+        }]
+      },
+      {
+        id: "g4b3", title: "品味呈現", achieved: false, note: "",
+        subgoals: [{
+          id: "g4b3s1", title: "儀態管理", achieved: false, note: "", rewards: [],
+          actions: [
+            { id: "g4b3s1a1", title: "檢視並優化1套穿搭風格", type: "check", done: false, achieved: false, logs: [], freq: { type: "monthly_once", startDate: todayKey() } },
+          ]
+        }]
+      },
+    ]
+  },
+  {
+    id: "g5", title: "原則覺知", color: "#9C7CC2", emoji: "🌍", achieved: false, note: "",
+    branches: [
+      {
+        id: "g5b1", title: "生活實踐", achieved: false, note: "",
+        subgoals: [
+          {
+            id: "g5b1s1", title: "環保行動", achieved: false, note: "", rewards: [],
+            actions: [
+              { id: "g5b1s1a1", title: "環保", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+            ]
+          },
+          {
+            id: "g5b1s2", title: "善良行動", achieved: false, note: "", rewards: [],
+            actions: [
+              { id: "g5b1s2a1", title: "善良", type: "check", done: false, achieved: false, logs: [], freq: { type: "daily", startDate: todayKey(), days: [] } },
+            ]
+          },
+        ]
+      },
+    ]
+  },
+];
+
+// ─── Deep update helper ───────────────────────────────────────────────────────
+function updateActionInGoals(goals, goalId, branchId, subgoalId, actionId, updater) {
+  return goals.map(g => g.id !== goalId ? g : {
+    ...g, branches: g.branches.map(b => b.id !== branchId ? b : {
+      ...b, subgoals: b.subgoals.map(s => s.id !== subgoalId ? s : {
+        ...s, actions: s.actions.map(a => a.id !== actionId ? a : updater(a))
+      })
+    })
+  });
+}
+
+function getTodayActions(goals) {
+  const actions = [];
+  goals.forEach(g => {
+    if (g.achieved) return;
+    g.branches.forEach(b => {
+      if (b.achieved) return;
+      b.subgoals.forEach(s => {
+        if (s.achieved) return;
+        s.actions.forEach(a => {
+          if (a.achieved) return;
+          if (!shouldShowToday(a.freq)) return;
+          actions.push({ ...a, goalTitle: g.title, goalColor: g.color, goalEmoji: g.emoji, goalId: g.id, branchId: b.id, subgoalId: s.id });
+        });
+      });
+    });
+  });
+  return actions;
+}
+
+function getAllActionsFlat(goals) {
+  const actions = [];
+  goals.forEach(g => {
+    g.branches.forEach(b => {
+      b.subgoals.forEach(s => {
+        s.actions.forEach(a => {
+          actions.push({ ...a, goalTitle: g.title, goalColor: g.color, goalEmoji: g.emoji, goalId: g.id, branchId: b.id, subgoalId: s.id });
+        });
+      });
+    });
+  });
+  return actions;
+}
+
+// ─── Preset colors & emojis ───────────────────────────────────────────────────
+const PRESET_COLORS = ["#7C9E8A","#8B9CC2","#C2A87C","#C27C8B","#9C7CC2","#7CA4C2","#C27C7C","#7CC2B4","#B4C27C","#C2B47C"];
+const PRESET_EMOJIS = ["🌿","💼","💰","🎨","📚","🏋️","🚀","🌍","🎯","💡","🧠","❤️","🌱","🔥","⭐","🎵"];
+
+// ─── Download helpers ─────────────────────────────────────────────────────────
+function downloadText(filename, content) {
+  const encoded = encodeURIComponent(content);
+  const a = document.createElement("a");
+  a.href = "data:text/plain;charset=utf-8," + encoded;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function exportCSV(goals) {
+  const rows = [["大目標","支線","小目標","行動","類型","頻率","狀態"]];
+  goals.forEach(g => {
+    g.branches.forEach(b => {
+      b.subgoals.forEach(s => {
+        s.actions.forEach(a => {
+          rows.push([g.title, b.title, s.title, a.title, a.type === "note" ? "紀錄型" : "勾選型", freqLabel(a.freq), a.achieved ? "已達成" : a.done ? "今日完成" : "進行中"]);
+        });
+      });
+    });
+  });
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+  downloadText("目標行動總表.csv", "\uFEFF" + csv);
+}
+
+function exportNotes(goals) {
+  let txt = "行動紀錄內容\n" + "=".repeat(40) + "\n\n";
+  goals.forEach(g => {
+    g.branches.forEach(b => {
+      b.subgoals.forEach(s => {
+        s.actions.forEach(a => {
+          if (!a.logs || a.logs.filter(l => l.type !== "check").length === 0) return;
+          txt += `【${g.title} > ${b.title} > ${a.title}】\n`;
+          a.logs.filter(l => l.type !== "check").forEach(l => { txt += `${dateLabel(l.date)}\n${l.text}\n\n`; });
+          txt += "-".repeat(30) + "\n\n";
+        });
+      });
+    });
+  });
+  downloadText("行動紀錄.txt", txt);
+}
+
+function exportJSON(goals) {
+  downloadText("目標備份.json", JSON.stringify(goals, null, 2));
+}
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+function ProgressBar({ value, color }) {
+  return (
+    <div style={{ background: "#f0ede8", borderRadius: 99, height: 5, overflow: "hidden" }}>
+      <div style={{ width: `${value}%`, background: color, height: "100%", borderRadius: 99, transition: "width 0.4s ease" }} />
+    </div>
+  );
+}
+
+function Tag({ color, emoji, title }) {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      background: color + "22", color: color,
+      fontSize: 11, fontWeight: 600, padding: "2px 8px",
+      borderRadius: 99, fontFamily: "DM Sans", letterSpacing: 0.3
+    }}>{emoji} {title}</span>
+  );
+}
+
+function AchievedBadge() {
+  return <span style={{ fontSize: 10, fontWeight: 700, color: "#888", background: "#f0ede8", borderRadius: 99, padding: "3px 8px", fontFamily: "DM Sans", letterSpacing: 0.5 }}>✓ 已達成</span>;
+}
+
+function AchieveButton({ achieved, onToggle, small }) {
+  return (
+    <button onClick={e => { e.stopPropagation(); onToggle(); }} style={{
+      padding: small ? "4px 10px" : "7px 16px", borderRadius: 99,
+      border: `1.5px solid ${achieved ? "#c8c4be" : "#1e1c1a"}`,
+      background: achieved ? "#f0ede8" : "#1e1c1a",
+      color: achieved ? "#999" : "#fff",
+      fontSize: small ? 11 : 12, fontFamily: "DM Sans", fontWeight: 600,
+      cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.2s", flexShrink: 0
+    }}>{achieved ? "取消達成" : "標記達成"}</button>
+  );
+}
+
+// ─── Goal Appearance Picker ───────────────────────────────────────────────────
+function GoalAppearancePicker({ color, emoji, onColorChange, onEmojiChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>顏色</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        {PRESET_COLORS.map(c => (
+          <div key={c} onClick={() => onColorChange(c)} style={{
+            width: 28, height: 28, borderRadius: 99, background: c, cursor: "pointer",
+            border: color === c ? "3px solid #1e1c1a" : "3px solid transparent",
+            boxSizing: "border-box", transition: "border 0.15s"
+          }} />
+        ))}
+      </div>
+      <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>圖示</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {PRESET_EMOJIS.map(e => (
+          <div key={e} onClick={() => onEmojiChange(e)} style={{
+            width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 20, cursor: "pointer",
+            background: emoji === e ? "#f0ede8" : "transparent",
+            border: emoji === e ? "2px solid #1e1c1a" : "2px solid transparent",
+            transition: "all 0.15s"
+          }}>{e}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Search Modal ─────────────────────────────────────────────────────────────
+function SearchModal({ goals, onClose, onOpenLog }) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+
+  const results = q.length < 1 ? [] : (() => {
+    const hits = [];
+    goals.forEach(g => {
+      if (g.title.toLowerCase().includes(q)) hits.push({ type: "goal", label: g.title, sub: "", color: g.color, emoji: g.emoji });
+      g.branches.forEach(b => {
+        if (b.title.toLowerCase().includes(q)) hits.push({ type: "branch", label: b.title, sub: g.title, color: g.color, emoji: g.emoji });
+        b.subgoals.forEach(s => {
+          s.actions.forEach(a => {
+            if (a.title.toLowerCase().includes(q))
+              hits.push({ type: "action", label: a.title, sub: `${g.title} › ${b.title}`, color: g.color, emoji: g.emoji, action: { ...a, goalTitle: g.title, goalColor: g.color, goalEmoji: g.emoji, goalId: g.id, branchId: b.id, subgoalId: s.id } });
+            (a.logs || []).forEach(l => {
+              if (l.text.toLowerCase().includes(q))
+                hits.push({ type: "log", label: l.text.slice(0, 60) + (l.text.length > 60 ? "…" : ""), sub: `${a.title} · ${dateLabel(l.date)}`, color: g.color, emoji: g.emoji, action: { ...a, goalTitle: g.title, goalColor: g.color, goalEmoji: g.emoji, goalId: g.id, branchId: b.id, subgoalId: s.id }, log: l });
+            });
+          });
+        });
+      });
+    });
+    return hits.slice(0, 30);
+  })();
+
+  const typeLabel = { goal: "目標", branch: "支線", action: "行動", log: "筆記" };
+  const typeColor = { goal: "#8B9CC2", branch: "#7C9E8A", action: "#C2A87C", log: "#C27C8B" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,26,0.5)", zIndex: 300, backdropFilter: "blur(4px)", display: "flex", flexDirection: "column", alignItems: "center" }} onClick={onClose}>
+      <div style={{ background: "#fff", width: "100%", maxWidth: 480, borderRadius: "0 0 24px 24px", boxShadow: "0 8px 40px rgba(0,0,0,0.18)", maxHeight: "85vh", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+        {/* Search bar */}
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #f0ede8", display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 18 }}>🔍</span>
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜尋目標、行動、筆記內容..." autoFocus
+            style={{ flex: 1, border: "none", outline: "none", fontSize: 16, fontFamily: "DM Sans", color: "#1e1c1a", background: "transparent" }} />
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "#bbb", fontSize: 20, padding: 0 }}>✕</button>
+        </div>
+        {/* Results */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "8px 0" }}>
+          {q && results.length === 0 && (
+            <p style={{ textAlign: "center", color: "#ccc", fontFamily: "DM Sans", fontSize: 14, padding: "40px 0" }}>找不到相關內容</p>
+          )}
+          {!q && (
+            <p style={{ textAlign: "center", color: "#ccc", fontFamily: "DM Sans", fontSize: 14, padding: "40px 0" }}>輸入關鍵字開始搜尋</p>
+          )}
+          {results.map((r, i) => (
+            <div key={i} onClick={() => { if (r.action) onOpenLog(r.action, r.log || null); onClose(); }}
+              style={{ padding: "12px 20px", borderBottom: "1px solid #f8f5f0", cursor: r.action ? "pointer" : "default", display: "flex", alignItems: "flex-start", gap: 12 }}>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>{r.emoji}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: typeColor[r.type], fontFamily: "DM Sans", letterSpacing: 0.5 }}>{typeLabel[r.type]}</span>
+                </div>
+                <p style={{ fontFamily: "DM Sans", fontSize: 14, color: "#1e1c1a", fontWeight: 500, marginBottom: 2 }}>{r.label}</p>
+                {r.sub && <p style={{ fontFamily: "DM Sans", fontSize: 12, color: "#aaa" }}>{r.sub}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Download Sheet ───────────────────────────────────────────────────────────
+function DownloadSheet({ goals, onClose, onImport }) {
+  const fileRef = useRef(null);
+
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target.result);
+        if (!Array.isArray(imported)) throw new Error("格式錯誤");
+        onImport(imported);
+        onClose();
+      } catch {
+        alert("檔案格式不正確，請選擇由本 App 匯出的 JSON 備份檔。");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,26,0.45)", zIndex: 300, display: "flex", alignItems: "flex-end", justifyContent: "center", backdropFilter: "blur(4px)" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: "24px 24px 0 0", padding: "0 0 48px", width: "100%", maxWidth: 480, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "20px 24px 0" }}>
+          <div style={{ width: 36, height: 4, background: "#e0ddd8", borderRadius: 99, margin: "0 auto 20px" }} />
+          <h3 style={{ fontFamily: "DM Serif Display, serif", fontSize: 20, color: "#1e1c1a", fontWeight: 400, marginBottom: 6 }}>資料管理</h3>
+          <p style={{ fontSize: 13, color: "#aaa", fontFamily: "DM Sans", marginBottom: 24 }}>匯出或匯入資料</p>
+
+          {/* 匯出 */}
+          <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 10 }}>匯出</p>
+          {[
+            { icon: "📊", title: "目標與行動總表", desc: "包含所有目標、支線、行動與狀態", ext: "CSV", fn: () => exportCSV(goals) },
+            { icon: "📝", title: "行動紀錄內容", desc: "所有筆記型行動的文字紀錄", ext: "TXT", fn: () => exportNotes(goals) },
+            { icon: "💾", title: "全部資料備份", desc: "完整資料，可用於還原或轉移", ext: "JSON", fn: () => exportJSON(goals) },
+          ].map(({ icon, title, desc, ext, fn }) => (
+            <div key={ext} onClick={() => { fn(); onClose(); }} style={{
+              display: "flex", alignItems: "center", gap: 16,
+              padding: "16px 18px", background: "#faf9f7", borderRadius: 16,
+              border: "1.5px solid #ede9e3", marginBottom: 10, cursor: "pointer"
+            }}>
+              <span style={{ fontSize: 28, flexShrink: 0 }}>{icon}</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontFamily: "DM Sans", fontSize: 15, fontWeight: 600, color: "#1e1c1a", marginBottom: 2 }}>{title}</p>
+                <p style={{ fontFamily: "DM Sans", fontSize: 12, color: "#aaa" }}>{desc}</p>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "#1e1c1a", borderRadius: 6, padding: "3px 8px", fontFamily: "DM Sans" }}>{ext}</span>
+            </div>
+          ))}
+
+          {/* 匯入 */}
+          <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 10, marginTop: 20 }}>匯入</p>
+          <div onClick={() => fileRef.current?.click()} style={{
+            display: "flex", alignItems: "center", gap: 16,
+            padding: "16px 18px", background: "#faf9f7", borderRadius: 16,
+            border: "1.5px solid #ede9e3", cursor: "pointer"
+          }}>
+            <span style={{ fontSize: 28, flexShrink: 0 }}>📂</span>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontFamily: "DM Sans", fontSize: 15, fontWeight: 600, color: "#1e1c1a", marginBottom: 2 }}>從備份還原</p>
+              <p style={{ fontFamily: "DM Sans", fontSize: 12, color: "#aaa" }}>選擇 JSON 備份檔，與現有資料合併</p>
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "#7C9E8A", borderRadius: 6, padding: "3px 8px", fontFamily: "DM Sans" }}>JSON</span>
+          </div>
+          <input ref={fileRef} type="file" accept=".json,.txt" onChange={handleImport} style={{ display: "none" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── Mini Calendar for specific_dates picker ────────────────────────────────
+// ─── Inline Calendar (embedded, no modal) ────────────────────────────────────
+function InlineCalendar({ selectedDates, onChange }) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+  const dowNames = ["日","一","二","三","四","五","六"];
+  const prevMonth = () => viewMonth === 0 ? (setViewMonth(11), setViewYear(y => y-1)) : setViewMonth(m => m-1);
+  const nextMonth = () => viewMonth === 11 ? (setViewMonth(0), setViewYear(y => y+1)) : setViewMonth(m => m+1);
+  const toggleDate = (ds) => onChange(selectedDates.includes(ds) ? selectedDates.filter(d => d !== ds) : [...selectedDates, ds].sort());
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <div style={{ background: "#f8f6f2", borderRadius: 12, padding: "10px 12px", marginTop: 8 }}>
+      {/* Month nav */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <button onClick={prevMonth} style={{ background: "none", border: "none", cursor: "pointer", color: "#888", fontSize: 16, padding: "0 4px" }}>‹</button>
+        <span style={{ fontFamily: "DM Sans", fontWeight: 600, color: "#1e1c1a", fontSize: 13 }}>{viewYear}年 {monthNames[viewMonth]}</span>
+        <button onClick={nextMonth} style={{ background: "none", border: "none", cursor: "pointer", color: "#888", fontSize: 16, padding: "0 4px" }}>›</button>
+      </div>
+      {/* DOW headers */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2, marginBottom: 2 }}>
+        {dowNames.map(d => <div key={d} style={{ textAlign: "center", fontSize: 10, color: "#bbb", fontFamily: "DM Sans", fontWeight: 600 }}>{d}</div>)}
+      </div>
+      {/* Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
+        {cells.map((day, i) => {
+          if (!day) return <div key={"e"+i} />;
+          const ds = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+          const sel = selectedDates.includes(ds);
+          const isTod = ds === todayKey();
+          return (
+            <div key={ds} onClick={() => toggleDate(ds)} style={{
+              aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
+              borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: "DM Sans",
+              fontWeight: sel ? 700 : 400,
+              background: sel ? "#1e1c1a" : "transparent",
+              color: sel ? "#fff" : isTod ? "#1e1c1a" : "#555",
+              border: isTod && !sel ? "1.5px solid #c8c4be" : "1.5px solid transparent",
+              transition: "all 0.12s"
+            }}>{day}</div>
+          );
+        })}
+      </div>
+      {/* Summary */}
+      {selectedDates.length > 0 && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <p style={{ fontSize: 11, color: "#7C9E8A", fontFamily: "DM Sans", fontWeight: 600 }}>
+            已選 {selectedDates.length} 天
+          </p>
+          <button onClick={() => onChange([])} style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", background: "none", border: "none", cursor: "pointer", padding: 0 }}>清除</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FreqPicker({ freq, onChange }) {
+  const t = freq?.type || "daily";
+  const DOW = ["日", "一", "二", "三", "四", "五", "六"];
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>頻率</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {[["daily","每天"],["alternate","隔天"],["weekly_specific","每週特定"],["weekly_once","每週一次"],["monthly_once","每月一次"],["specific_dates","指定日期"]].map(([k, v]) => (
+          <button key={k} onClick={() => {
+            if (k === "specific_dates") onChange({ type: k, dates: freq?.type === "specific_dates" ? (freq?.dates || []) : [], startDate: todayKey() });
+            else onChange({ type: k, startDate: todayKey(), days: t === "weekly_specific" && k === "weekly_specific" ? (freq?.days || []) : [] });
+          }} style={{
+            padding: "6px 12px", borderRadius: 99, border: "1.5px solid",
+            borderColor: t === k ? "#1e1c1a" : "#e8e4de",
+            background: t === k ? "#1e1c1a" : "#fff",
+            color: t === k ? "#fff" : "#888",
+            fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+          }}>{v}</button>
+        ))}
+      </div>
+      {t === "weekly_specific" && (
+        <div style={{ display: "flex", gap: 6 }}>
+          {DOW.map((d, i) => {
+            const selected = (freq?.days || []).includes(i);
+            return (
+              <button key={i} onClick={() => {
+                const days = selected ? (freq.days || []).filter(x => x !== i) : [...(freq.days || []), i];
+                onChange({ ...freq, days });
+              }} style={{
+                width: 34, height: 34, borderRadius: 99, border: "1.5px solid",
+                borderColor: selected ? "#1e1c1a" : "#e8e4de",
+                background: selected ? "#1e1c1a" : "#fff",
+                color: selected ? "#fff" : "#aaa",
+                fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer"
+              }}>{d}</button>
+            );
+          })}
+        </div>
+      )}
+      {t === "specific_dates" && (
+        <InlineCalendar
+          selectedDates={freq?.dates || []}
+          onChange={(dates) => onChange({ ...freq, dates })}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Log Detail Modal (editable + deletable) ─────────────────────────────────
+function LogDetailModal({ log, actionTitle, goalColor, goalEmoji, goalTitle, onClose, onSave, onDelete }) {
+  const [text, setText] = useState(log.text);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const dirty = text !== log.text;
+
+  const handleSave = () => { onSave(log.id, text); setEditing(false); };
+  const handleDelete = () => { onDelete(log.id); onClose(); };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(30,28,26,0.5)", zIndex: 200,
+      display: "flex", alignItems: "flex-end", justifyContent: "center", backdropFilter: "blur(4px)"
+    }} onClick={onClose}>
+      <div style={{
+        background: "#fff", borderRadius: "24px 24px 0 0", padding: "0 0 40px",
+        width: "100%", maxWidth: 480, boxShadow: "0 -8px 40px rgba(0,0,0,0.14)",
+        maxHeight: "88vh", display: "flex", flexDirection: "column"
+      }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ padding: "16px 24px 0", flexShrink: 0 }}>
+          <div style={{ width: 36, height: 4, background: "#e0ddd8", borderRadius: 99, margin: "0 auto 16px" }} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <Tag color={goalColor} emoji={goalEmoji} title={goalTitle} />
+            <button onClick={() => setConfirmDelete(true)} style={{
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: 13, color: "#ccc", fontFamily: "DM Sans", padding: 0
+            }}>🗑️ 刪除</button>
+          </div>
+          <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 17, color: "#1e1c1a", lineHeight: 1.4, marginBottom: 4 }}>{actionTitle}</p>
+          <p style={{ fontSize: 12, color: "#bbb", fontFamily: "DM Sans", marginBottom: 14 }}>{dateLabel(log.date)}</p>
+          <div style={{ borderBottom: "1px solid #f0ede8" }} />
+        </div>
+
+        {/* Content — click to edit */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "16px 24px 0" }}>
+          {editing ? (
+            <textarea
+              value={text} onChange={e => setText(e.target.value)} autoFocus
+              style={{
+                width: "100%", minHeight: 200, border: "1.5px solid #1e1c1a",
+                borderRadius: 14, padding: "12px 14px", fontSize: 15,
+                fontFamily: "DM Sans", resize: "none", outline: "none",
+                color: "#1e1c1a", background: "#faf9f7", boxSizing: "border-box", lineHeight: 1.8
+              }}
+            />
+          ) : (
+            <p onClick={() => setEditing(true)} style={{
+              fontFamily: "DM Sans", fontSize: 15, color: "#333", lineHeight: 1.8,
+              whiteSpace: "pre-wrap", cursor: "text", minHeight: 80
+            }}>
+              {text}
+              <span style={{ fontSize: 12, color: "#ccc", marginLeft: 6 }}>點擊編輯</span>
+            </p>
+          )}
+        </div>
+
+        {/* Save / Cancel buttons when editing */}
+        {editing && (
+          <div style={{ padding: "12px 24px 0", flexShrink: 0, display: "flex", gap: 8 }}>
+            <button onClick={() => { setText(log.text); setEditing(false); }} style={{
+              flex: 1, padding: "12px", borderRadius: 12, border: "1.5px solid #e8e4de",
+              background: "#fff", color: "#888", fontSize: 14, fontFamily: "DM Sans", cursor: "pointer"
+            }}>取消</button>
+            <button onClick={handleSave} disabled={!dirty} style={{
+              flex: 2, padding: "12px", borderRadius: 12, border: "none",
+              background: dirty ? "#1e1c1a" : "#e8e4de",
+              color: dirty ? "#fff" : "#bbb",
+              fontSize: 14, fontFamily: "DM Sans", fontWeight: 600, cursor: dirty ? "pointer" : "default"
+            }}>儲存修改</button>
+          </div>
+        )}
+
+        {/* Delete confirm */}
+        {confirmDelete && (
+          <div style={{
+            position: "absolute", inset: 0, background: "rgba(255,255,255,0.95)",
+            borderRadius: "24px 24px 0 0", display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", padding: 32, gap: 16
+          }}>
+            <p style={{ fontSize: 32 }}>🗑️</p>
+            <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 20, color: "#1e1c1a", textAlign: "center" }}>確定要刪除這筆紀錄？</p>
+            <p style={{ fontFamily: "DM Sans", fontSize: 14, color: "#aaa", textAlign: "center" }}>刪除後無法復原</p>
+            <div style={{ display: "flex", gap: 10, width: "100%" }}>
+              <button onClick={() => setConfirmDelete(false)} style={{
+                flex: 1, padding: "13px", borderRadius: 14, border: "1.5px solid #e8e4de",
+                background: "#fff", color: "#888", fontSize: 15, fontFamily: "DM Sans", cursor: "pointer"
+              }}>取消</button>
+              <button onClick={handleDelete} style={{
+                flex: 1, padding: "13px", borderRadius: 14, border: "none",
+                background: "#e05555", color: "#fff", fontSize: 15, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer"
+              }}>刪除</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Log Modal (action logs list + add) ──────────────────────────────────────
+function LogModal({ action, onClose, onSaveLog, onUpdateLog, onDeleteLog, onToggleDone }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [newNote, setNewNote] = useState("");
+  const [viewLog, setViewLog] = useState(null);
+  const isNote = action.type === "note";
+
+  const handleSave = () => {
+    if (!newNote.trim()) return;
+    onSaveLog(action, { id: genId(), date: todayKey(), text: newNote.trim() });
+    setNewNote(""); setShowAdd(false);
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(30,28,26,0.45)", zIndex: 100,
+      display: "flex", alignItems: "flex-end", justifyContent: "center", backdropFilter: "blur(4px)"
+    }} onClick={onClose}>
+      <div style={{
+        background: "#fff", borderRadius: "24px 24px 0 0", padding: "0 0 40px",
+        width: "100%", maxWidth: 480, boxShadow: "0 -8px 40px rgba(0,0,0,0.12)",
+        maxHeight: "88vh", display: "flex", flexDirection: "column"
+      }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ padding: "16px 24px 0", flexShrink: 0 }}>
+          <div style={{ width: 36, height: 4, background: "#e0ddd8", borderRadius: 99, margin: "0 auto 16px" }} />
+          <Tag color={action.goalColor} emoji={action.goalEmoji} title={action.goalTitle} />
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginTop: 8, marginBottom: 4 }}>
+            <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, color: "#1e1c1a", lineHeight: 1.4, flex: 1 }}>
+              {action.title}
+              {isNote && <span style={{ fontSize: 13, marginLeft: 6, color: "#aaa" }}>📝</span>}
+            </p>
+            {!isNote && (
+              <button onClick={() => { onToggleDone(action); onClose(); }} style={{
+                marginLeft: 12, padding: "6px 14px", borderRadius: 99, border: "1.5px solid",
+                borderColor: action.done ? "#c8c4be" : "#7C9E8A",
+                background: action.done ? "#f0ede8" : "#7C9E8A22",
+                color: action.done ? "#999" : "#5a8a6a",
+                fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer", flexShrink: 0
+              }}>{action.done ? "取消完成" : "標記完成"}</button>
+            )}
+          </div>
+          <p style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", marginBottom: 14 }}>
+            {freqLabel(action.freq)} · {action.logs.filter(l => l.type !== "check").length} 筆紀錄
+          </p>
+          <div style={{ borderBottom: "1px solid #f0ede8", marginBottom: 0 }} />
+        </div>
+
+        {/* Log list */}
+        <div style={{ overflowY: "auto", flex: 1, padding: "12px 24px 0" }}>
+          {action.logs.filter(l => l.type !== "check").length === 0 && !showAdd && (
+            <div style={{ textAlign: "center", padding: "28px 0", color: "#ccc" }}>
+              <p style={{ fontSize: 32, marginBottom: 8 }}>📄</p>
+              <p style={{ fontFamily: "DM Sans", fontSize: 14 }}>還沒有紀錄</p>
+            </div>
+          )}
+
+          {/* Wallet-style list */}
+          {[...action.logs].filter(l => l.type !== "check").reverse().map(log => (
+            <div key={log.id} onClick={() => setViewLog(log)} style={{
+              background: "#faf9f7", borderRadius: 14, padding: "12px 16px",
+              marginBottom: 10, cursor: "pointer", border: "1.5px solid #ede9e3",
+              transition: "background 0.15s"
+            }}>
+              <p style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>
+                {dateLabel(log.date)}
+              </p>
+              <p style={{
+                fontFamily: "DM Sans", fontSize: 14, color: "#444", lineHeight: 1.6,
+                overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical"
+              }}>{log.text}</p>
+              <p style={{ fontSize: 11, color: action.goalColor, fontFamily: "DM Sans", fontWeight: 600, marginTop: 6 }}>查看全文 →</p>
+            </div>
+          ))}
+
+          {/* Add form */}
+          {showAdd && (
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
+                今天 · {new Date().toLocaleDateString("zh-TW", { month: "long", day: "numeric" })}
+              </p>
+              <textarea value={newNote} onChange={e => setNewNote(e.target.value)}
+                placeholder={isNote ? "今天的思考與整理..." : "備註..."}
+                autoFocus
+                style={{
+                  width: "100%", minHeight: 140, border: "1.5px solid #1e1c1a",
+                  borderRadius: 14, padding: "12px 14px", fontSize: 14,
+                  fontFamily: "DM Sans", resize: "none", outline: "none",
+                  color: "#1e1c1a", background: "#faf9f7", boxSizing: "border-box", lineHeight: 1.7
+                }}
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button onClick={() => { setShowAdd(false); setNewNote(""); }} style={{
+                  flex: 1, padding: "11px", borderRadius: 12, border: "1.5px solid #e8e4de",
+                  background: "#fff", color: "#888", fontSize: 14, fontFamily: "DM Sans", cursor: "pointer"
+                }}>取消</button>
+                <button onClick={handleSave} style={{
+                  flex: 2, padding: "11px", borderRadius: 12, border: "none",
+                  background: "#1e1c1a", color: "#fff", fontSize: 14, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer"
+                }}>儲存</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Add button */}
+        {!showAdd && (
+          <div style={{ padding: "12px 24px 0", flexShrink: 0 }}>
+            <button onClick={() => setShowAdd(true)} style={{
+              width: "100%", padding: "13px", borderRadius: 14, border: "none",
+              background: "#1e1c1a", color: "#fff", fontSize: 15,
+              fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer"
+            }}>+ 新增紀錄</button>
+          </div>
+        )}
+      </div>
+
+      {/* Log detail overlay */}
+      {viewLog && (
+        <LogDetailModal
+          log={viewLog}
+          actionTitle={action.title}
+          goalColor={action.goalColor}
+          goalEmoji={action.goalEmoji}
+          goalTitle={action.goalTitle}
+          onClose={() => setViewLog(null)}
+          onSave={(logId, newText) => { onUpdateLog(action, logId, newText); setViewLog(prev => prev ? { ...prev, text: newText } : prev); }}
+          onDelete={(logId) => { onDeleteLog(action, logId); setViewLog(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Today Tab ────────────────────────────────────────────────────────────────
+function TodayTab({ goals, onToggleAction, onSaveLog, onUpdateLog, onDeleteLog }) {
+  const [logAction, setLogAction] = useState(null);
+  const actions = getTodayActions(goals);
+  const done = actions.filter(a => a.done).length;
+  const total = actions.length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+
+  const getRefreshed = (a) => {
+    if (!a) return null;
+    const found = getAllActionsFlat(goals).find(x => x.id === a.id);
+    return found || a;
+  };
+
+  return (
+    <div style={{ padding: "0 20px 100px" }}>
+      <div style={{ paddingTop: 60, paddingBottom: 24 }}>
+        <p style={{ fontSize: 13, color: "#aaa", fontFamily: "DM Sans", fontWeight: 500, marginBottom: 4 }}>{todayStr()}</p>
+        <h1 style={{ fontFamily: "DM Serif Display, serif", fontSize: 30, color: "#1e1c1a", fontWeight: 400, marginBottom: 16, lineHeight: 1.2 }}>今日待辦</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ flex: 1 }}><ProgressBar value={pct} color="#1e1c1a" /></div>
+          <span style={{ fontSize: 13, fontFamily: "DM Sans", color: "#888", fontWeight: 500 }}>{done}/{total}</span>
+        </div>
+      </div>
+
+      {total === 0 && (
+        <div style={{ textAlign: "center", paddingTop: 60, color: "#ccc" }}>
+          <p style={{ fontSize: 40, marginBottom: 12 }}>🎉</p>
+          <p style={{ fontFamily: "DM Sans", fontSize: 15 }}>今天沒有待辦事項</p>
+          <p style={{ fontFamily: "DM Sans", fontSize: 13, marginTop: 4, color: "#ddd" }}>前往目標管理新增行動</p>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {actions.map(action => (
+          <div key={action.id} style={{
+            background: action.done ? "#f5f3f0" : "#fff",
+            border: "1.5px solid", borderColor: action.done ? "#e8e4de" : "#ede9e3",
+            borderRadius: 18, padding: "14px 16px",
+            display: "flex", alignItems: "flex-start", gap: 12,
+            boxShadow: action.done ? "none" : "0 2px 12px rgba(0,0,0,0.04)",
+            transition: "all 0.25s"
+          }}>
+            {/* Checkbox */}
+            <div onClick={() => onToggleAction(action)} style={{
+              width: 24, height: 24, borderRadius: 8, border: "2px solid",
+              borderColor: action.done ? action.goalColor : "#d0ccc6",
+              background: action.done ? action.goalColor : "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: "pointer", flexShrink: 0, marginTop: 2, transition: "all 0.2s"
+            }}>
+              {action.done && <span style={{ color: "#fff", fontSize: 13 }}>✓</span>}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{
+                fontFamily: "DM Sans", fontSize: 15, fontWeight: 500,
+                color: action.done ? "#aaa" : "#1e1c1a",
+                textDecoration: action.done ? "line-through" : "none",
+                marginBottom: 6, lineHeight: 1.4
+              }}>
+                {action.title}
+                {action.type === "note" && <span style={{ marginLeft: 5, fontSize: 12, color: "#bbb" }}>📝</span>}
+              </p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <Tag color={action.goalColor} emoji={action.goalEmoji} title={action.goalTitle} />
+                <span style={{ fontSize: 11, color: "#ccc", fontFamily: "DM Sans" }}>{freqLabel(action.freq)}</span>
+                {action.logs.filter(l => l.type !== "check").length > 0 && <span style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans" }}>{action.logs.filter(l => l.type !== "check").length} 筆紀錄</span>}
+              </div>
+            </div>
+
+            {/* Note button */}
+            <button onClick={() => setLogAction(action)} style={{
+              background: "none", border: "none", cursor: "pointer", fontSize: 17, opacity: 0.35, padding: 0, flexShrink: 0, marginTop: 2
+            }}>✏️</button>
+          </div>
+        ))}
+      </div>
+
+      {logAction && (
+        <LogModal
+          action={getRefreshed(logAction)}
+          onClose={() => setLogAction(null)}
+          onSaveLog={onSaveLog}
+          onUpdateLog={onUpdateLog}
+          onDeleteLog={onDeleteLog}
+          onToggleDone={onToggleAction}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Inline Add ───────────────────────────────────────────────────────────────
+function InlineAdd({ placeholder, onAdd, color, small, showType, showNote }) {
+  const [active, setActive] = useState(false);
+  const [val, setVal] = useState("");
+  const [note, setNote] = useState("");
+  const [type, setType] = useState(null);
+  const [freq, setFreq] = useState(null);
+
+  const reset = () => { setVal(""); setNote(""); setType(null); setFreq(null); setActive(false); };
+
+  const canSubmit = showType
+    ? val.trim() && type !== null && freq !== null
+    : val.trim();
+
+  const submit = () => {
+    if (!canSubmit) return;
+    if (showType) onAdd(val.trim(), type, freq);
+    else if (showNote) onAdd(val.trim(), note.trim());
+    else onAdd(val.trim());
+    reset();
+  };
+
+  if (!active) return (
+    <button onClick={() => setActive(true)} style={{
+      padding: small ? "8px 12px" : "10px 14px", borderRadius: 12,
+      border: "1px dashed #d0ccc6", background: "transparent",
+      color: "#bbb", fontSize: small ? 13 : 14, fontFamily: "DM Sans", cursor: "pointer", width: "100%"
+    }}>+ {placeholder}</button>
+  );
+
+  return (
+    <div style={{ background: "#faf9f7", borderRadius: 14, padding: 14, marginBottom: 4, border: "1.5px solid #ede9e3" }}>
+      <input value={val} onChange={e => setVal(e.target.value)} placeholder={placeholder} autoFocus
+        onKeyDown={e => e.key === "Enter" && canSubmit && submit()}
+        style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 14, fontFamily: "DM Sans", outline: "none", background: "transparent", paddingBottom: 8, marginBottom: 10, boxSizing: "border-box" }} />
+
+      {showNote && (
+        <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="說明（選填）..."
+          style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 12, fontFamily: "DM Sans", outline: "none", paddingBottom: 6, marginBottom: 10, boxSizing: "border-box", resize: "none", minHeight: 44, background: "transparent", color: "#666", lineHeight: 1.6 }} />
+      )}
+
+      {showType && (
+        <>
+          {/* 類型選擇 */}
+          <div style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
+              類型 {type === null && <span style={{ color: "#e05555" }}>*</span>}
+            </p>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[["check", "✅ 勾選型"], ["note", "📝 紀錄型"]].map(([k, v]) => (
+                <button key={k} onClick={() => setType(k)} style={{
+                  flex: 1, padding: "7px", borderRadius: 8, border: "1.5px solid",
+                  borderColor: type === k ? "#1e1c1a" : "#e8e4de",
+                  background: type === k ? "#1e1c1a" : "#fff",
+                  color: type === k ? "#fff" : "#888",
+                  fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+                }}>{v}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* 頻率選擇 */}
+          <div style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>
+              頻率 {freq === null && <span style={{ color: "#e05555" }}>*</span>}
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+              {[["daily","每天"],["alternate","隔天"],["weekly_specific","每週特定"],["weekly_once","每週一次"],["monthly_once","每月一次"],["specific_dates","指定日期"]].map(([k, v]) => (
+                <button key={k} onClick={() => {
+                  if (k === "specific_dates") setFreq({ type: k, dates: [], startDate: todayKey() });
+                  else setFreq({ type: k, startDate: todayKey(), days: [] });
+                }} style={{
+                  padding: "6px 12px", borderRadius: 99, border: "1.5px solid",
+                  borderColor: freq?.type === k ? "#1e1c1a" : "#e8e4de",
+                  background: freq?.type === k ? "#1e1c1a" : "#fff",
+                  color: freq?.type === k ? "#fff" : "#888",
+                  fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+                }}>{v}</button>
+              ))}
+            </div>
+            {/* 每週特定 DOW picker */}
+            {freq?.type === "weekly_specific" && (
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                {["日","一","二","三","四","五","六"].map((d, i) => {
+                  const sel = (freq.days || []).includes(i);
+                  return (
+                    <button key={i} onClick={() => {
+                      const days = sel ? freq.days.filter(x => x !== i) : [...(freq.days || []), i];
+                      setFreq({ ...freq, days });
+                    }} style={{
+                      width: 34, height: 34, borderRadius: 99, border: "1.5px solid",
+                      borderColor: sel ? "#1e1c1a" : "#e8e4de",
+                      background: sel ? "#1e1c1a" : "#fff",
+                      color: sel ? "#fff" : "#aaa",
+                      fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer"
+                    }}>{d}</button>
+                  );
+                })}
+              </div>
+            )}
+            {/* 指定日期 - 內嵌月曆 */}
+            {freq?.type === "specific_dates" && (
+              <InlineCalendar
+                selectedDates={freq.dates || []}
+                onChange={(dates) => setFreq({ ...freq, dates })}
+              />
+            )}
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={submit} disabled={!canSubmit} style={{
+          flex: 1, padding: "9px", borderRadius: 10, border: "none",
+          background: canSubmit ? (color || "#1e1c1a") : "#e8e4de",
+          color: canSubmit ? "#fff" : "#bbb",
+          fontSize: 13, fontFamily: "DM Sans", fontWeight: 600,
+          cursor: canSubmit ? "pointer" : "default",
+          transition: "all 0.15s"
+        }}>新增</button>
+        <button onClick={reset} style={{ padding: "9px 14px", borderRadius: 10, border: "1px solid #e8e4de", background: "#fff", color: "#aaa", cursor: "pointer" }}>✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Gift Box Modal ───────────────────────────────────────────────────────────
+function GiftModal({ reward, subgoalTitle, onClose }) {
+  const [opened, setOpened] = useState(false);
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(20,16,12,0.75)", zIndex: 400,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      backdropFilter: "blur(6px)", padding: 24
+    }} onClick={opened ? onClose : undefined}>
+      <div style={{
+        background: "#fff", borderRadius: 28, padding: "36px 28px 32px",
+        width: "100%", maxWidth: 340, textAlign: "center",
+        boxShadow: "0 24px 80px rgba(0,0,0,0.3)",
+        animation: "popIn 0.35s cubic-bezier(0.34,1.56,0.64,1)"
+      }}>
+        <style>{`
+          @keyframes popIn { from { transform: scale(0.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+          @keyframes shake { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-8deg)} 40%{transform:rotate(8deg)} 60%{transform:rotate(-5deg)} 80%{transform:rotate(5deg)} }
+          @keyframes openLid { from{transform:rotate(0deg) translateY(0)} to{transform:rotate(-40deg) translateY(-18px)} }
+          @keyframes floatUp { from{opacity:0;transform:translateY(10px) scale(0.8)} to{opacity:1;transform:translateY(0) scale(1)} }
+          @keyframes confetti { 0%{opacity:1;transform:translateY(0) rotate(0deg)} 100%{opacity:0;transform:translateY(-60px) rotate(360deg)} }
+        `}</style>
+
+        {!opened ? (
+          <>
+            <p style={{ fontSize: 13, color: "#aaa", fontFamily: "DM Sans", marginBottom: 6 }}>{subgoalTitle}</p>
+            <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 20, color: "#1e1c1a", marginBottom: 24, lineHeight: 1.3 }}>
+              {reward.type === "milestone" ? `🎉 達成 ${reward.threshold} 天！` : "🎉 目標完成！"}
+            </p>
+            {/* Gift box */}
+            <div onClick={() => setOpened(true)} style={{ cursor: "pointer", display: "inline-block", position: "relative", marginBottom: 24 }}>
+              <div style={{ animation: "shake 0.6s ease infinite", display: "inline-block" }}>
+                <span style={{ fontSize: 80, display: "block", lineHeight: 1 }}>🎁</span>
+              </div>
+              <p style={{ fontSize: 13, color: "#bbb", fontFamily: "DM Sans", marginTop: 10 }}>點擊打開禮物</p>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Confetti dots */}
+            <div style={{ position: "relative", height: 20, marginBottom: 8, overflow: "hidden" }}>
+              {["#FFD700","#FF6B6B","#7C9E8A","#8B9CC2","#C2A87C"].map((c, i) => (
+                <div key={i} style={{
+                  position: "absolute", left: `${15 + i * 17}%`,
+                  width: 8, height: 8, borderRadius: "50%", background: c,
+                  animation: `confetti 0.8s ${i * 0.1}s ease-out forwards`
+                }} />
+              ))}
+            </div>
+            <div style={{ animation: "floatUp 0.4s ease" }}>
+              <p style={{ fontSize: 13, color: "#aaa", fontFamily: "DM Sans", marginBottom: 4 }}>{subgoalTitle}</p>
+              <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, color: "#1e1c1a", marginBottom: 20, lineHeight: 1.3 }}>
+                {reward.type === "milestone" ? `堅持了 ${reward.threshold} 天！` : "恭喜達成目標！"}
+              </p>
+              <div style={{ background: "#faf9f7", borderRadius: 20, padding: "20px 16px", marginBottom: 24, border: "1.5px solid #ede9e3" }}>
+                <p style={{ fontSize: 48, marginBottom: 10 }}>{reward.emoji || "🎀"}</p>
+                <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, color: "#1e1c1a", lineHeight: 1.5 }}>{reward.text}</p>
+              </div>
+              <p style={{ fontSize: 12, color: "#bbb", fontFamily: "DM Sans", marginBottom: 16 }}>
+                已加入紀錄 · 可在成就頁再次查看
+              </p>
+            </div>
+            <button onClick={onClose} style={{
+              width: "100%", padding: "13px", borderRadius: 14, border: "none",
+              background: "#1e1c1a", color: "#fff", fontSize: 15, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer"
+            }}>太棒了！</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Reward Section (collapsible wrapper) ────────────────────────────────────
+function RewardSection({ rewards, rewardCount, unlockedCount, onSave }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div style={{ marginTop: 8, background: "#fff", borderRadius: 12, border: "1px solid #ede9e3", overflow: "hidden" }}>
+      {/* Header — always visible */}
+      <div onClick={() => setExpanded(e => !e)} style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 14px", cursor: "pointer"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14 }}>🎁</span>
+          <span style={{ fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, color: "#888" }}>
+            小禮物
+            {rewardCount > 0 && (
+              <span style={{
+                marginLeft: 6, fontSize: 11, background: unlockedCount > 0 ? "#f5fbf7" : "#f0ede8",
+                color: unlockedCount > 0 ? "#7C9E8A" : "#aaa",
+                border: `1px solid ${unlockedCount > 0 ? "#a8d8b8" : "#e8e4de"}`,
+                borderRadius: 99, padding: "1px 7px", fontWeight: 600
+              }}>
+                {unlockedCount > 0 ? `${unlockedCount}/${rewardCount} 已解鎖` : `${rewardCount} 個`}
+              </span>
+            )}
+          </span>
+        </div>
+        <span style={{ fontSize: 12, color: "#ccc" }}>{expanded ? "▲" : "▼"}</span>
+      </div>
+
+      {/* Body — collapsible */}
+      {expanded && (
+        <div style={{ borderTop: "1px solid #f0ede8", padding: "0 14px 14px" }}>
+          <RewardEditor rewards={rewards} onSave={onSave} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Reward Editor ─────────────────────────────────────────────────────────────
+const REWARD_EMOJIS = ["🎀","🍰","🎬","👗","✈️","💆","🛍️","🍜","📚","🎮","💅","🌸","🥂","🎵","⭐","🏖️"];
+
+function RewardEditor({ rewards, onSave }) {
+  const [list, setList] = useState(rewards || []);
+  const [adding, setAdding] = useState(false);
+  const [editIdx, setEditIdx] = useState(null);
+  const [form, setForm] = useState({ type: "milestone", threshold: 30, text: "", emoji: "🎀" });
+
+  const openAdd = () => { setForm({ type: "milestone", threshold: 30, text: "", emoji: "🎀" }); setEditIdx(null); setAdding(true); };
+  const openEdit = (i) => { setForm({ ...list[i] }); setEditIdx(i); setAdding(true); };
+
+  const save = () => {
+    if (!form.text.trim()) return;
+    const newList = editIdx !== null
+      ? list.map((r, i) => i === editIdx ? { ...form, id: r.id } : r)
+      : [...list, { ...form, id: genId(), unlockedAt: null }];
+    setList(newList);
+    onSave(newList);
+    setAdding(false);
+  };
+
+  const remove = (i) => {
+    const newList = list.filter((_, idx) => idx !== i);
+    setList(newList);
+    onSave(newList);
+  };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>🎁 小禮物設定</p>
+        {!adding && <button onClick={openAdd} style={{ fontSize: 12, color: "#888", fontFamily: "DM Sans", background: "none", border: "1.5px solid #e8e4de", borderRadius: 8, padding: "4px 10px", cursor: "pointer" }}>＋ 新增</button>}
+      </div>
+
+      {/* Reward list */}
+      {list.length === 0 && !adding && (
+        <p style={{ fontSize: 12, color: "#ccc", fontFamily: "DM Sans", textAlign: "center", padding: "10px 0" }}>還沒有設定小禮物</p>
+      )}
+      {list.map((r, i) => (
+        <div key={r.id} style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+          background: r.unlockedAt ? "#f5fbf7" : "#faf9f7",
+          border: `1.5px solid ${r.unlockedAt ? "#a8d8b8" : "#ede9e3"}`,
+          borderRadius: 12, marginBottom: 6
+        }}>
+          <span style={{ fontSize: 22, flexShrink: 0 }}>{r.emoji || "🎀"}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 12, fontFamily: "DM Sans", color: "#555", fontWeight: 500 }}>{r.text}</p>
+            <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans" }}>
+              {r.type === "milestone" ? `累積 ${r.threshold} 天` : "完成時"}
+              {r.unlockedAt && <span style={{ color: "#7C9E8A", fontWeight: 600 }}> · ✓ 已解鎖</span>}
+            </p>
+          </div>
+          <button onClick={() => openEdit(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 14, padding: 0 }}>✏️</button>
+          <button onClick={() => remove(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ddd", fontSize: 14, padding: 0 }}>✕</button>
+        </div>
+      ))}
+
+      {/* Add/Edit form */}
+      {adding && (
+        <div style={{ background: "#faf9f7", border: "1.5px solid #1e1c1a", borderRadius: 14, padding: 14, marginTop: 4 }}>
+          {/* Type */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            {[["milestone", "📅 累積天數"], ["complete", "🏁 完成時"]].map(([k, v]) => (
+              <button key={k} onClick={() => setForm(f => ({ ...f, type: k }))} style={{
+                flex: 1, padding: "7px", borderRadius: 8, border: "1.5px solid",
+                borderColor: form.type === k ? "#1e1c1a" : "#e8e4de",
+                background: form.type === k ? "#1e1c1a" : "#fff",
+                color: form.type === k ? "#fff" : "#888",
+                fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+              }}>{v}</button>
+            ))}
+          </div>
+          {/* Threshold */}
+          {form.type === "milestone" && (
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>累積天數門檻</p>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[7, 14, 21, 30, 60, 100].map(n => (
+                  <button key={n} onClick={() => setForm(f => ({ ...f, threshold: n }))} style={{
+                    padding: "5px 12px", borderRadius: 99, border: "1.5px solid",
+                    borderColor: form.threshold === n ? "#1e1c1a" : "#e8e4de",
+                    background: form.threshold === n ? "#1e1c1a" : "#fff",
+                    color: form.threshold === n ? "#fff" : "#888",
+                    fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+                  }}>{n} 天</button>
+                ))}
+                <input type="number" value={form.threshold} onChange={e => setForm(f => ({ ...f, threshold: parseInt(e.target.value) || 1 }))}
+                  style={{ width: 60, border: "1.5px solid #e8e4de", borderRadius: 8, padding: "5px 8px", fontSize: 12, fontFamily: "DM Sans", outline: "none", textAlign: "center" }} />
+              </div>
+            </div>
+          )}
+          {/* Emoji picker */}
+          <div style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>圖示</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {REWARD_EMOJIS.map(e => (
+                <div key={e} onClick={() => setForm(f => ({ ...f, emoji: e }))} style={{
+                  width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 20, cursor: "pointer",
+                  background: form.emoji === e ? "#f0ede8" : "transparent",
+                  border: form.emoji === e ? "2px solid #1e1c1a" : "2px solid transparent"
+                }}>{e}</div>
+              ))}
+            </div>
+          </div>
+          {/* Text */}
+          <div style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 6 }}>獎勵內容</p>
+            <input value={form.text} onChange={e => setForm(f => ({ ...f, text: e.target.value }))}
+              placeholder="例如：買一件新衣服" autoFocus
+              style={{ width: "100%", border: "1.5px solid #e8e4de", borderRadius: 10, padding: "9px 12px", fontSize: 14, fontFamily: "DM Sans", outline: "none", background: "#fff", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setAdding(false)} style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 13, fontFamily: "DM Sans", cursor: "pointer" }}>取消</button>
+            <button onClick={save} disabled={!form.text.trim()} style={{
+              flex: 2, padding: "10px", borderRadius: 10, border: "none",
+              background: form.text.trim() ? "#1e1c1a" : "#e8e4de",
+              color: form.text.trim() ? "#fff" : "#bbb",
+              fontSize: 13, fontFamily: "DM Sans", fontWeight: 600, cursor: form.text.trim() ? "pointer" : "default"
+            }}>儲存</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Subgoal Card ─────────────────────────────────────────────────────────────
+function SubgoalCard({ sub, goalColor, goalId, branchId, expanded, onToggle, onAddAction, onDeleteAction, onDeleteSubgoal, onAchieveAction, onAchieveSubgoal, onSaveLog, onUpdateLog, onDeleteLog, onToggleDone, onUpdateSubgoal }) {
+  const [logAction, setLogAction] = useState(null);
+  const [editingActionId, setEditingActionId] = useState(null);
+  const [editActionTitle, setEditActionTitle] = useState("");
+  const [editActionFreq, setEditActionFreq] = useState(null);
+  const [editingSubgoalTitle, setEditingSubgoalTitle] = useState(false);
+  const [subgoalTitleVal, setSubgoalTitleVal] = useState(sub.title);
+  const [editingSubgoalNote, setEditingSubgoalNote] = useState(false);
+  const [subgoalNoteVal, setSubgoalNoteVal] = useState(sub.note || "");
+  const activeActions = sub.actions.filter(a => !a.achieved);
+  const done = activeActions.filter(a => a.done).length;
+  const activeDays = getSubgoalActiveDays(sub);
+
+  const startEditAction = (action, e) => {
+    e.stopPropagation();
+    setEditingActionId(action.id);
+    setEditActionTitle(action.title);
+    setEditActionFreq(action.freq || { type: "daily", startDate: todayKey(), days: [] });
+  };
+  const saveEditAction = (action) => {
+    if (!editActionTitle.trim()) return;
+    onUpdateSubgoal({ ...sub, actions: sub.actions.map(a => a.id === action.id ? { ...a, title: editActionTitle.trim(), freq: editActionFreq } : a) });
+    setEditingActionId(null);
+  };
+  const saveSubgoalTitle = () => {
+    if (!subgoalTitleVal.trim()) { setEditingSubgoalTitle(false); return; }
+    onUpdateSubgoal({ ...sub, title: subgoalTitleVal.trim(), note: subgoalNoteVal.trim() });
+    setEditingSubgoalTitle(false);
+  };
+  const saveSubgoalNote = () => {
+    onUpdateSubgoal({ ...sub, note: subgoalNoteVal.trim() });
+    setEditingSubgoalNote(false);
+  };
+
+  return (
+    <div style={{ marginBottom: 8, opacity: sub.achieved ? 0.55 : 1 }}>
+      <div style={{ background: "#fff", border: "1.5px solid #ede9e3", borderRadius: 14, padding: "12px 14px" }}>
+        {editingSubgoalTitle ? (
+          <div>
+            <input value={subgoalTitleVal} onChange={e => setSubgoalTitleVal(e.target.value)} autoFocus
+              onKeyDown={e => { if (e.key === "Escape") { setSubgoalTitleVal(sub.title); setSubgoalNoteVal(sub.note || ""); setEditingSubgoalTitle(false); } }}
+              style={{ width: "100%", border: "none", borderBottom: "1.5px solid #1e1c1a", fontSize: 14, fontFamily: "DM Sans", fontWeight: 500, outline: "none", background: "transparent", paddingBottom: 4, marginBottom: 8, boxSizing: "border-box" }} />
+            <textarea value={subgoalNoteVal} onChange={e => setSubgoalNoteVal(e.target.value)} placeholder="說明（選填）..."
+              style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 12, fontFamily: "DM Sans", outline: "none", paddingBottom: 6, marginBottom: 8, boxSizing: "border-box", resize: "none", minHeight: 44, background: "transparent", color: "#666", lineHeight: 1.6 }} />
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => { setSubgoalTitleVal(sub.title); setSubgoalNoteVal(sub.note || ""); setEditingSubgoalTitle(false); }} style={{ flex: 1, padding: "6px", borderRadius: 8, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 12, fontFamily: "DM Sans", cursor: "pointer" }}>取消</button>
+              <button onClick={saveSubgoalTitle} style={{ flex: 2, padding: "6px", borderRadius: 8, border: "none", background: "#1e1c1a", color: "#fff", fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>儲存</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: sub.achieved ? 0 : 6 }}>
+              <p onClick={onToggle} style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 500, color: "#1e1c1a", flex: 1, textDecoration: sub.achieved ? "line-through" : "none", cursor: "pointer" }}>{sub.title}</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {sub.achieved ? <AchievedBadge /> : <span style={{ fontSize: 12, color: "#aaa", fontFamily: "DM Sans" }}>{done}/{activeActions.length}</span>}
+                {activeDays > 0 && !sub.achieved && <span style={{ fontSize: 11, color: goalColor, fontFamily: "DM Sans", fontWeight: 600 }}>🔥{activeDays}天</span>}
+                {!sub.achieved && onUpdateSubgoal && (
+                  <button onClick={e => { e.stopPropagation(); setSubgoalTitleVal(sub.title); setSubgoalNoteVal(sub.note || ""); setEditingSubgoalTitle(true); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 13, padding: 0 }}>✏️</button>
+                )}
+                <button onClick={e => { e.stopPropagation(); onDeleteSubgoal(); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#ddd", fontSize: 14, padding: 0 }}>✕</button>
+                <span onClick={onToggle} style={{ color: "#ccc", fontSize: 13, cursor: "pointer" }}>{expanded ? "▲" : "▼"}</span>
+              </div>
+            </div>
+            </>
+        )}
+        {!sub.achieved && <ProgressBar value={activeActions.length ? (done / activeActions.length) * 100 : 0} color={goalColor} />}
+
+        {/* 說明在框內 */}
+        {expanded && !sub.achieved && sub.note && !editingSubgoalNote && (
+          <div style={{ borderTop: "1px solid #ede9e3", marginTop: 8, paddingTop: 8 }}>
+            <p style={{ fontSize: 12, color: "#888", fontFamily: "DM Sans", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{sub.note}</p>
+          </div>
+        )}
+        {expanded && onUpdateSubgoal && !sub.achieved && editingSubgoalNote && (
+          <div style={{ borderTop: "1px solid #ede9e3", marginTop: 8, paddingTop: 8 }}>
+            <textarea value={subgoalNoteVal} onChange={e => setSubgoalNoteVal(e.target.value)} autoFocus
+              placeholder="說明..."
+              style={{ width: "100%", border: "1.5px solid #1e1c1a", borderRadius: 10, padding: "8px 10px", fontSize: 12, fontFamily: "DM Sans", outline: "none", resize: "none", minHeight: 56, background: "#fff", color: "#444", lineHeight: 1.6, boxSizing: "border-box" }} />
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button onClick={() => { setSubgoalNoteVal(sub.note || ""); setEditingSubgoalNote(false); }} style={{ flex: 1, padding: "6px", borderRadius: 8, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 12, fontFamily: "DM Sans", cursor: "pointer" }}>取消</button>
+              <button onClick={saveSubgoalNote} style={{ flex: 2, padding: "6px", borderRadius: 8, border: "none", background: "#1e1c1a", color: "#fff", fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>儲存</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 行動在框外縮排 */}
+      {expanded && (
+        <div style={{ marginLeft: 12, marginTop: 6 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+            <AchieveButton achieved={sub.achieved} onToggle={onAchieveSubgoal} small />
+          </div>
+          {sub.actions.map(action => (
+            <div key={action.id} style={{ marginBottom: 6 }}>
+              {editingActionId === action.id ? (
+                // ── Edit mode ──
+                <div style={{ background: "#fff", borderRadius: 12, border: "1.5px solid #1e1c1a", padding: "12px 14px" }}>
+                  <input value={editActionTitle} onChange={e => setEditActionTitle(e.target.value)} autoFocus
+                    onKeyDown={e => e.key === "Escape" && setEditingActionId(null)}
+                    style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 14, fontFamily: "DM Sans", outline: "none", background: "transparent", paddingBottom: 8, marginBottom: 12, boxSizing: "border-box" }} />
+                  <FreqPicker freq={editActionFreq} onChange={setEditActionFreq} />
+                  <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                    <button onClick={() => setEditingActionId(null)} style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 12, fontFamily: "DM Sans", cursor: "pointer" }}>取消</button>
+                    <button onClick={() => saveEditAction(action)} disabled={!editActionTitle.trim()} style={{ flex: 2, padding: "8px", borderRadius: 8, border: "none", background: editActionTitle.trim() ? goalColor : "#e8e4de", color: "#fff", fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>儲存</button>
+                  </div>
+                </div>
+              ) : (
+                // ── Normal mode ──
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 12px", background: "#fff", borderRadius: 12,
+                  border: "1px solid #ede9e3", opacity: action.achieved ? 0.45 : 1
+                }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 6, border: `2px solid ${action.achieved ? "#ccc" : goalColor}`,
+                    background: action.done && !action.achieved ? goalColor : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0
+                  }}>
+                    {(action.done || action.achieved) && <span style={{ color: action.achieved ? "#ccc" : "#fff", fontSize: 11 }}>✓</span>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setLogAction({ ...action, goalColor, goalId, branchId, subgoalId: sub.id, goalTitle: sub.title })}>
+                    <p style={{ fontFamily: "DM Sans", fontSize: 13.5, color: "#1e1c1a", textDecoration: action.achieved ? "line-through" : "none" }}>
+                      {action.title}
+                      {action.type === "note" && <span style={{ marginLeft: 4, fontSize: 11, color: "#bbb" }}>📝</span>}
+                    </p>
+                    <p style={{ fontSize: 11, color: "#ccc", fontFamily: "DM Sans", marginTop: 1 }}>
+                      {freqLabel(action.freq)}{action.logs.filter(l => l.type !== "check").length > 0 ? ` · ${action.logs.filter(l => l.type !== "check").length} 筆紀錄` : ""}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {!action.achieved && onUpdateSubgoal && (
+                      <button onClick={(e) => startEditAction(action, e)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 13, padding: 0 }}>✏️</button>
+                    )}
+                    <AchieveButton achieved={action.achieved} onToggle={() => onAchieveAction(action.id)} small />
+                    <button onClick={() => onDeleteAction(action.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ddd", fontSize: 14, padding: 0 }}>✕</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          <InlineAdd placeholder="新增行動項目..." onAdd={(title, type, freq) => onAddAction(title, type, freq)} color={goalColor} small showType />
+
+          {/* Reward editor - collapsible */}
+          {onUpdateSubgoal && (() => {
+            const rewardCount = (sub.rewards || []).length;
+            const unlockedCount = (sub.rewards || []).filter(r => r.unlockedAt).length;
+            return (
+              <RewardSection
+                rewards={sub.rewards || []}
+                rewardCount={rewardCount}
+                unlockedCount={unlockedCount}
+                onSave={(newRewards) => onUpdateSubgoal({ ...sub, rewards: newRewards })}
+              />
+            );
+          })()}
+        </div>
+      )}
+
+      {logAction && (
+        <LogModal
+          action={logAction}
+          onClose={() => setLogAction(null)}
+          onSaveLog={(action, log) => { onSaveLog(action, log); setLogAction(prev => prev ? { ...prev, logs: [...(prev.logs || []), log] } : prev); }}
+          onUpdateLog={(action, logId, newText) => { onUpdateLog(action, logId, newText); setLogAction(prev => prev ? { ...prev, logs: prev.logs.map(l => l.id === logId ? { ...l, text: newText } : l) } : prev); }}
+          onDeleteLog={(action, logId) => { onDeleteLog(action, logId); setLogAction(prev => prev ? { ...prev, logs: prev.logs.filter(l => l.id !== logId) } : prev); }}
+          onToggleDone={(action) => { onToggleDone(action); setLogAction(prev => prev ? { ...prev, done: !prev.done } : prev); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Goal Detail Modal ────────────────────────────────────────────────────────
+function GoalDetailModal({ goal, onClose, onUpdate, onDelete, onSaveLog, onUpdateLog, onDeleteLog, onToggleAction, onTriggerReward }) {
+  const [g, setG] = useState(JSON.parse(JSON.stringify(goal)));
+  const [addingBranch, setAddingBranch] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [newBranchNote, setNewBranchNote] = useState("");
+  const [expandedBranch, setExpandedBranch] = useState(null);
+  const [expandedSubgoal, setExpandedSubgoal] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [editGoalTitle, setEditGoalTitle] = useState(g.title);
+  const [editGoalNote, setEditGoalNote] = useState(g.note || "");
+  const [editGoalColor, setEditGoalColor] = useState(g.color);
+  const [editGoalEmoji, setEditGoalEmoji] = useState(g.emoji);
+  const [editingBranchId, setEditingBranchId] = useState(null);
+  const [editBranchTitle, setEditBranchTitle] = useState("");
+  const [editBranchNote, setEditBranchNote] = useState("");
+
+  const saveGoalMeta = () => {
+    if (!editGoalTitle.trim()) return;
+    save({ ...g, title: editGoalTitle.trim(), note: editGoalNote.trim(), color: editGoalColor, emoji: editGoalEmoji });
+    setEditingGoal(false);
+  };
+  const saveEditBranch = (bId) => {
+    if (!editBranchTitle.trim()) return;
+    save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, title: editBranchTitle.trim(), note: editBranchNote.trim() } : b) });
+    setEditingBranchId(null);
+  };
+
+  const save = (updated) => { setG(updated); onUpdate(updated); };
+  const addBranch = () => {
+    if (!newBranchName.trim()) return;
+    save({ ...g, branches: [...g.branches, { id: genId(), title: newBranchName.trim(), note: newBranchNote.trim(), achieved: false, subgoals: [] }] });
+    setNewBranchName(""); setNewBranchNote(""); setAddingBranch(false);
+  };
+  const addSubgoal = (bId, title, note) => save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: [...b.subgoals, { id: genId(), title, note: note || "", achieved: false, actions: [] }] } : b) });
+  const addAction = (bId, sId, title, type, freq) => save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: b.subgoals.map(s => s.id === sId ? { ...s, actions: [...s.actions, { id: genId(), title, type: type || "check", done: false, achieved: false, logs: [], freq: freq || { type: "daily", startDate: todayKey(), days: [] } }] } : s) } : b) });
+  const deleteAction = (bId, sId, aId) => save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: b.subgoals.map(s => s.id === sId ? { ...s, actions: s.actions.filter(a => a.id !== aId) } : s) } : b) });
+  const deleteBranch = (bId) => save({ ...g, branches: g.branches.filter(b => b.id !== bId) });
+  const deleteSubgoal = (bId, sId) => save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: b.subgoals.filter(s => s.id !== sId) } : b) });
+  const achieveAction = (bId, sId, aId) => save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: b.subgoals.map(s => s.id === sId ? { ...s, actions: s.actions.map(a => a.id === aId ? { ...a, achieved: !a.achieved } : a) } : s) } : b) });
+  const achieveSubgoal = (bId, sId) => {
+    const sub = g.branches.find(b => b.id === bId)?.subgoals.find(s => s.id === sId);
+    if (sub && !sub.achieved) {
+      const completeReward = (sub.rewards || []).find(r => r.type === "complete" && !r.unlockedAt);
+      if (completeReward && onTriggerReward) {
+        setTimeout(() => onTriggerReward(completeReward, sub.title), 200);
+        // Mark as unlocked
+        save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: b.subgoals.map(s => s.id === sId ? {
+          ...s, achieved: true, rewards: (s.rewards || []).map(r => r.id === completeReward.id ? { ...r, unlockedAt: todayKey() } : r)
+        } : s) } : b) });
+        return;
+      }
+    }
+    save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: b.subgoals.map(s => s.id === sId ? { ...s, achieved: !s.achieved } : s) } : b) });
+  };
+  const achieveBranch = (bId) => save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, achieved: !b.achieved } : b) });
+  const updateSubgoal = (bId, updatedSub) => save({ ...g, branches: g.branches.map(b => b.id === bId ? { ...b, subgoals: b.subgoals.map(s => s.id === updatedSub.id ? updatedSub : s) } : b) });
+
+  const allActions = g.branches.flatMap(b => b.subgoals.flatMap(s => s.actions));
+  const activeActions = allActions.filter(a => !a.achieved);
+  const done = activeActions.filter(a => a.done).length;
+  const pct = activeActions.length ? Math.round((done / activeActions.length) * 100) : 0;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#faf9f7", zIndex: 50, overflowY: "auto" }}>
+      <div style={{ position: "sticky", top: 0, background: "#faf9f7", padding: "52px 20px 16px", borderBottom: "1px solid #ede9e3", zIndex: 10 }}>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#888", fontFamily: "DM Sans", padding: 0, marginBottom: 10 }}>← 返回</button>
+
+        {editingGoal ? (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: "10px 14px", background: "#f5f3f0", borderRadius: 14, borderLeft: `4px solid ${editGoalColor}` }}>
+              <span style={{ fontSize: 26 }}>{editGoalEmoji}</span>
+              <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 16, color: editGoalTitle ? "#1e1c1a" : "#ccc" }}>{editGoalTitle || "目標名稱"}</p>
+            </div>
+            <input value={editGoalTitle} onChange={e => setEditGoalTitle(e.target.value)} autoFocus
+              style={{ width: "100%", border: "none", borderBottom: "1.5px solid #1e1c1a", fontSize: 16, fontFamily: "DM Sans", outline: "none", paddingBottom: 6, marginBottom: 12, boxSizing: "border-box", background: "transparent" }} />
+            <textarea value={editGoalNote} onChange={e => setEditGoalNote(e.target.value)} placeholder="說明（選填）..."
+              style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 13, fontFamily: "DM Sans", outline: "none", paddingBottom: 8, marginBottom: 14, boxSizing: "border-box", resize: "none", minHeight: 56, background: "transparent", color: "#666", lineHeight: 1.6 }} />
+            <GoalAppearancePicker color={editGoalColor} emoji={editGoalEmoji} onColorChange={setEditGoalColor} onEmojiChange={setEditGoalEmoji} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setEditingGoal(false)} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 13, fontFamily: "DM Sans", cursor: "pointer" }}>取消</button>
+              <button onClick={saveGoalMeta} style={{ flex: 2, padding: "10px", borderRadius: 12, border: "none", background: "#1e1c1a", color: "#fff", fontSize: 13, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>儲存</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: g.note ? 8 : 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 32 }}>{g.emoji}</span>
+                <div>
+                  <h2 style={{ fontFamily: "DM Serif Display, serif", fontSize: 24, color: "#1e1c1a", fontWeight: 400, textDecoration: g.achieved ? "line-through" : "none" }}>{g.title}</h2>
+                  <p style={{ fontSize: 12, color: "#aaa", fontFamily: "DM Sans" }}>{g.branches.length} 支線 · {allActions.length} 行動</p>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {!g.achieved && <button onClick={() => { setEditGoalTitle(g.title); setEditGoalNote(g.note || ""); setEditGoalColor(g.color); setEditGoalEmoji(g.emoji); setEditingGoal(true); }} style={{ background: "none", border: "1.5px solid #f0ede8", borderRadius: 99, padding: "7px 12px", cursor: "pointer", color: "#bbb", fontSize: 13 }}>✏️</button>}
+                <AchieveButton achieved={g.achieved} onToggle={() => save({ ...g, achieved: !g.achieved })} />
+                <button onClick={() => setConfirmDelete({ type: "goal", label: g.title, fn: onDelete })} style={{ background: "none", border: "1.5px solid #f0ede8", borderRadius: 99, padding: "7px 12px", cursor: "pointer", color: "#ccc", fontSize: 13 }}>🗑️</button>
+              </div>
+            </div>
+            {g.note && (
+              <p style={{ fontSize: 13, color: "#888", fontFamily: "DM Sans", lineHeight: 1.7, marginBottom: 12, whiteSpace: "pre-wrap" }}>{g.note}</p>
+            )}
+          </>
+        )}
+        {!g.achieved && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, color: "#aaa", fontFamily: "DM Sans" }}>整體進度</span>
+              <span style={{ fontSize: 12, color: g.color, fontFamily: "DM Sans", fontWeight: 600 }}>{pct}%</span>
+            </div>
+            <ProgressBar value={pct} color={g.color} />
+          </>
+        )}
+      </div>
+
+      <div style={{ padding: "20px 20px 100px" }}>
+        {g.branches.map(branch => (
+          <div key={branch.id} style={{ marginBottom: 14, opacity: branch.achieved ? 0.55 : 1 }}>
+            <div style={{
+              background: "#fff", border: "1.5px solid #ede9e3", borderRadius: 16,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.04)"
+            }}>
+              {/* Branch header */}
+              <div style={{
+                padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between",
+                cursor: branch.achieved ? "default" : "pointer"
+              }} onClick={() => !branch.achieved && editingBranchId !== branch.id && setExpandedBranch(expandedBranch === branch.id ? null : branch.id)}>
+                <div style={{ flex: 1 }}>
+                  {editingBranchId === branch.id ? (
+                    <div onClick={e => e.stopPropagation()}>
+                      <input value={editBranchTitle} onChange={e => setEditBranchTitle(e.target.value)} autoFocus
+                        onKeyDown={e => { if (e.key === "Escape") setEditingBranchId(null); }}
+                        style={{ width: "100%", border: "none", borderBottom: "1.5px solid #1e1c1a", fontSize: 15, fontFamily: "DM Sans", fontWeight: 600, outline: "none", background: "transparent", paddingBottom: 4, marginBottom: 8, boxSizing: "border-box" }} />
+                      <textarea value={editBranchNote} onChange={e => setEditBranchNote(e.target.value)} placeholder="說明（選填）..."
+                        style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 12, fontFamily: "DM Sans", outline: "none", paddingBottom: 6, marginBottom: 8, boxSizing: "border-box", resize: "none", minHeight: 44, background: "transparent", color: "#666", lineHeight: 1.6 }} />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => saveEditBranch(branch.id)} style={{ flex: 1, padding: "6px", borderRadius: 8, border: "none", background: "#1e1c1a", color: "#fff", fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>儲存</button>
+                        <button onClick={() => setEditingBranchId(null)} style={{ padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 12, cursor: "pointer" }}>✕</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p style={{ fontFamily: "DM Sans", fontWeight: 600, fontSize: 15, color: "#1e1c1a", textDecoration: branch.achieved ? "line-through" : "none" }}>{branch.title}</p>
+                      <p style={{ fontSize: 12, color: "#aaa", fontFamily: "DM Sans" }}>{branch.subgoals.length} 個小目標</p>
+                    </>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={e => e.stopPropagation()}>
+                  {!branch.achieved && editingBranchId !== branch.id && (
+                    <button onClick={() => { setEditBranchTitle(branch.title); setEditBranchNote(branch.note || ""); setEditingBranchId(branch.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 13, padding: 0 }}>✏️</button>
+                  )}
+                  <AchieveButton achieved={branch.achieved} onToggle={() => achieveBranch(branch.id)} small />
+                  <button onClick={() => setConfirmDelete({ type: "branch", label: branch.title, fn: () => deleteBranch(branch.id) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#ddd", fontSize: 15, padding: 0 }}>✕</button>
+                  {!branch.achieved && <span style={{ color: "#ccc", fontSize: 14 }} onClick={() => setExpandedBranch(expandedBranch === branch.id ? null : branch.id)}>{expandedBranch === branch.id ? "▲" : "▼"}</span>}
+                </div>
+              </div>
+
+              {/* Expanded content — note inside the white box */}
+              {expandedBranch === branch.id && !branch.achieved && branch.note && (
+                <div style={{ borderTop: "1px solid #f0ede8", padding: "10px 16px 14px" }}>
+                  <p style={{ fontSize: 12, color: "#888", fontFamily: "DM Sans", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{branch.note}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Subgoals — outside the branch box, indented */}
+            {expandedBranch === branch.id && !branch.achieved && (
+              <div style={{ marginTop: 8, marginLeft: 12 }}>
+                {branch.subgoals.map(sub => (
+                  <SubgoalCard
+                    key={sub.id} sub={sub} goalColor={g.color} goalId={g.id} branchId={branch.id}
+                    expanded={expandedSubgoal === sub.id}
+                    onToggle={() => setExpandedSubgoal(expandedSubgoal === sub.id ? null : sub.id)}
+                    onAddAction={(title, type, freq) => addAction(branch.id, sub.id, title, type, freq)}
+                    onDeleteAction={(aId) => deleteAction(branch.id, sub.id, aId)}
+                    onDeleteSubgoal={() => setConfirmDelete({ type: "subgoal", label: sub.title, fn: () => deleteSubgoal(branch.id, sub.id) })}
+                    onAchieveAction={(aId) => achieveAction(branch.id, sub.id, aId)}
+                    onAchieveSubgoal={() => achieveSubgoal(branch.id, sub.id)}
+                    onSaveLog={onSaveLog}
+                    onUpdateLog={onUpdateLog}
+                    onDeleteLog={onDeleteLog}
+                    onToggleDone={onToggleAction}
+                    onUpdateSubgoal={(updatedSub) => updateSubgoal(branch.id, updatedSub)}
+                  />
+                ))}
+                <InlineAdd placeholder="新增小目標..." onAdd={(t, note) => addSubgoal(branch.id, t, note)} color={g.color} showNote />
+              </div>
+            )}
+          </div>
+        ))}
+
+        {addingBranch ? (
+          <div style={{ background: "#fff", border: "1.5px solid #1e1c1a", borderRadius: 16, padding: 16 }}>
+            <input value={newBranchName} onChange={e => setNewBranchName(e.target.value)} placeholder="支線名稱..." autoFocus
+              style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 15, fontFamily: "DM Sans", fontWeight: 600, outline: "none", paddingBottom: 8, marginBottom: 10, boxSizing: "border-box", background: "transparent" }}
+              onKeyDown={e => e.key === "Enter" && addBranch()} />
+            <textarea value={newBranchNote} onChange={e => setNewBranchNote(e.target.value)} placeholder="說明（選填）..."
+              style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 13, fontFamily: "DM Sans", outline: "none", paddingBottom: 8, marginBottom: 12, boxSizing: "border-box", resize: "none", minHeight: 48, background: "transparent", color: "#666", lineHeight: 1.6 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={addBranch} style={{ flex: 1, padding: "10px 16px", borderRadius: 12, border: "none", background: "#1e1c1a", color: "#fff", fontSize: 14, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>新增</button>
+              <button onClick={() => { setAddingBranch(false); setNewBranchNote(""); }} style={{ padding: "10px 14px", borderRadius: 12, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", cursor: "pointer" }}>✕</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddingBranch(true)} style={{
+            width: "100%", padding: "14px", borderRadius: 16, border: "1.5px dashed #d0ccc6",
+            background: "transparent", color: "#aaa", fontSize: 14, fontFamily: "DM Sans", cursor: "pointer", fontWeight: 500
+          }}>+ 新增支線</button>
+        )}
+      </div>
+
+      {/* Confirm delete overlay */}
+      {confirmDelete && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,26,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmDelete(null)}>
+          <div style={{ background: "#fff", borderRadius: 24, padding: 28, width: "100%", maxWidth: 360, textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <p style={{ fontSize: 32, marginBottom: 12 }}>🗑️</p>
+            <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 20, color: "#1e1c1a", marginBottom: 8 }}>確定刪除「{confirmDelete.label}」？</p>
+            <p style={{ fontFamily: "DM Sans", fontSize: 13, color: "#aaa", marginBottom: 24 }}>刪除後無法復原</p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmDelete(null)} style={{ flex: 1, padding: "13px", borderRadius: 14, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 15, fontFamily: "DM Sans", cursor: "pointer" }}>取消</button>
+              <button onClick={() => { confirmDelete.fn(); setConfirmDelete(null); }} style={{ flex: 1, padding: "13px", borderRadius: 14, border: "none", background: "#e05555", color: "#fff", fontSize: 15, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>刪除</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Goals Tab ────────────────────────────────────────────────────────────────
+function GoalsTab({ goals, onUpdateGoal, onAddGoal, onDeleteGoal, onSaveLog, onUpdateLog, onDeleteLog, onToggleAction, onSearchOpen, onDownloadOpen, onTriggerReward }) {
+  const [detailGoal, setDetailGoal] = useState(null);
+  const [addingGoal, setAddingGoal] = useState(false);
+  const [newGoalTitle, setNewGoalTitle] = useState("");
+  const [newGoalNote, setNewGoalNote] = useState("");
+  const [newGoalColor, setNewGoalColor] = useState(PRESET_COLORS[0]);
+  const [newGoalEmoji, setNewGoalEmoji] = useState(PRESET_EMOJIS[0]);
+  const [confirmDeleteGoal, setConfirmDeleteGoal] = useState(null);
+
+  if (detailGoal) {
+    const fresh = goals.find(g => g.id === detailGoal.id) || detailGoal;
+    return <GoalDetailModal goal={fresh} onClose={() => setDetailGoal(null)} onUpdate={(updated) => { onUpdateGoal(updated); setDetailGoal(updated); }} onDelete={() => { onDeleteGoal(detailGoal.id); setDetailGoal(null); }} onSaveLog={onSaveLog} onUpdateLog={onUpdateLog} onDeleteLog={onDeleteLog} onToggleAction={onToggleAction} onTriggerReward={onTriggerReward} />;
+  }
+
+  return (
+    <div style={{ padding: "0 20px 100px" }}>
+      <div style={{ paddingTop: 60, paddingBottom: 24 }}>
+        <h1 style={{ fontFamily: "DM Serif Display, serif", fontSize: 30, color: "#1e1c1a", fontWeight: 400 }}>目標管理</h1>
+        <p style={{ fontSize: 13, color: "#aaa", fontFamily: "DM Sans" }}>{goals.length} 個大目標</p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {goals.map(goal => {
+          const allActions = goal.branches.flatMap(b => b.subgoals.flatMap(s => s.actions));
+          const activeActions = allActions.filter(a => !a.achieved);
+          const done = activeActions.filter(a => a.done).length;
+          const pct = activeActions.length ? Math.round((done / activeActions.length) * 100) : 0;
+          return (
+            <div key={goal.id} style={{ position: "relative" }}>
+              <div onClick={() => setDetailGoal(goal)} style={{
+                background: "#fff", border: "1.5px solid #ede9e3", borderRadius: 20,
+                padding: "18px 20px", cursor: "pointer",
+                boxShadow: "0 2px 12px rgba(0,0,0,0.05)",
+                borderLeft: `4px solid ${goal.achieved ? "#ccc" : goal.color}`,
+                opacity: goal.achieved ? 0.6 : 1
+              }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: goal.achieved ? 0 : 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 28 }}>{goal.emoji}</span>
+                    <div>
+                      <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 18, color: "#1e1c1a", fontWeight: 400, textDecoration: goal.achieved ? "line-through" : "none" }}>{goal.title}</p>
+                      <p style={{ fontSize: 12, color: "#aaa", fontFamily: "DM Sans" }}>{goal.branches.length} 支線 · {allActions.length} 行動</p>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {goal.achieved ? <AchievedBadge /> : <span style={{ fontSize: 15, fontFamily: "DM Sans", fontWeight: 600, color: goal.color }}>{pct}%</span>}
+                    <button onClick={e => { e.stopPropagation(); setConfirmDeleteGoal(goal.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#ddd", fontSize: 15, padding: 0 }}>✕</button>
+                  </div>
+                </div>
+                {!goal.achieved && <ProgressBar value={pct} color={goal.color} />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        {addingGoal ? (
+          <div style={{ background: "#fff", border: "1.5px solid #1e1c1a", borderRadius: 20, padding: 18 }}>
+            {/* Preview */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, padding: "10px 14px", background: "#faf9f7", borderRadius: 14, borderLeft: `4px solid ${newGoalColor}` }}>
+              <span style={{ fontSize: 26 }}>{newGoalEmoji}</span>
+              <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 16, color: newGoalTitle ? "#1e1c1a" : "#ccc" }}>{newGoalTitle || "目標名稱預覽"}</p>
+            </div>
+            <input value={newGoalTitle} onChange={e => setNewGoalTitle(e.target.value)} placeholder="大目標名稱..." autoFocus
+              style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 16, fontFamily: "DM Sans", outline: "none", marginBottom: 12, paddingBottom: 8, boxSizing: "border-box" }}
+            />
+            <textarea value={newGoalNote} onChange={e => setNewGoalNote(e.target.value)} placeholder="說明（選填）..."
+              style={{ width: "100%", border: "none", borderBottom: "1px solid #e8e4de", fontSize: 13, fontFamily: "DM Sans", outline: "none", marginBottom: 16, paddingBottom: 8, boxSizing: "border-box", resize: "none", minHeight: 56, background: "transparent", color: "#666", lineHeight: 1.6 }}
+            />
+            <GoalAppearancePicker color={newGoalColor} emoji={newGoalEmoji} onColorChange={setNewGoalColor} onEmojiChange={setNewGoalEmoji} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { if (newGoalTitle.trim()) { onAddGoal({ id: genId(), title: newGoalTitle.trim(), note: newGoalNote.trim(), color: newGoalColor, emoji: newGoalEmoji, achieved: false, branches: [] }); setNewGoalTitle(""); setNewGoalNote(""); setAddingGoal(false); } }}
+                style={{ flex: 1, padding: "11px", borderRadius: 12, border: "none", background: "#1e1c1a", color: "#fff", fontSize: 14, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>新增目標</button>
+              <button onClick={() => { setAddingGoal(false); setNewGoalTitle(""); setNewGoalNote(""); }}
+                style={{ padding: "11px 16px", borderRadius: 12, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 14, cursor: "pointer" }}>取消</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddingGoal(true)} style={{
+            width: "100%", padding: "16px", borderRadius: 20, border: "1.5px dashed #d0ccc6",
+            background: "transparent", color: "#aaa", fontSize: 15, fontFamily: "DM Sans", cursor: "pointer", fontWeight: 500
+          }}>+ 新增大目標</button>
+        )}
+      </div>
+
+      {/* Delete goal confirm */}
+      {confirmDeleteGoal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(30,28,26,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={() => setConfirmDeleteGoal(null)}>
+          <div style={{ background: "#fff", borderRadius: 24, padding: 28, width: "100%", maxWidth: 360, textAlign: "center" }} onClick={e => e.stopPropagation()}>
+            <p style={{ fontSize: 32, marginBottom: 12 }}>🗑️</p>
+            <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 20, color: "#1e1c1a", marginBottom: 8 }}>確定刪除這個目標？</p>
+            <p style={{ fontFamily: "DM Sans", fontSize: 13, color: "#aaa", marginBottom: 24 }}>所有支線、行動與紀錄都會一起刪除，無法復原</p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setConfirmDeleteGoal(null)} style={{ flex: 1, padding: "13px", borderRadius: 14, border: "1.5px solid #e8e4de", background: "#fff", color: "#888", fontSize: 15, fontFamily: "DM Sans", cursor: "pointer" }}>取消</button>
+              <button onClick={() => { onDeleteGoal(confirmDeleteGoal); setConfirmDeleteGoal(null); }} style={{ flex: 1, padding: "13px", borderRadius: 14, border: "none", background: "#e05555", color: "#fff", fontSize: 15, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer" }}>刪除</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Stats Tab components ─────────────────────────────────────────────────────
+function HeatmapCalendar({ goals }) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [filterGoalId, setFilterGoalId] = useState("all");
+  const [expandedDay, setExpandedDay] = useState(null);
+
+  const monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+  const dowNames = ["日","一","二","三","四","五","六"];
+
+  // Build day → count + entries map
+  const allActions = getAllActionsFlat(goals);
+  const filteredActions = filterGoalId === "all" ? allActions : allActions.filter(a => a.goalId === filterGoalId);
+
+  const dayMap = {}; // dateStr → { count, entries: [{actionTitle, goalColor, goalEmoji, type, text}] }
+  filteredActions.forEach(action => {
+    (action.logs || []).forEach(log => {
+      if (!dayMap[log.date]) dayMap[log.date] = { count: 0, entries: [] };
+      dayMap[log.date].count++;
+      dayMap[log.date].entries.push({
+        actionTitle: action.title, goalColor: action.goalColor, goalEmoji: action.goalEmoji,
+        type: log.type || "note", text: log.text, id: log.id
+      });
+    });
+  });
+
+  const maxCount = Math.max(1, ...Object.values(dayMap).map(d => d.count));
+
+  // Use goal color when filtering a single goal, else green
+  const selectedGoal = filterGoalId !== "all" ? goals.find(g => g.id === filterGoalId) : null;
+  const baseColor = selectedGoal ? selectedGoal.color : null;
+
+  const hexToRgb = (hex) => {
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return [r, g, b];
+  };
+  const blendWithWhite = (hex, intensity) => {
+    const [r,g,b] = hexToRgb(hex);
+    const blend = (c) => Math.round(c + (255 - c) * (1 - intensity));
+    return `rgb(${blend(r)},${blend(g)},${blend(b)})`;
+  };
+
+  const getColor = (count) => {
+    if (!count) return "#f0ede8";
+    const intensity = count / maxCount;
+    if (baseColor) {
+      // Use goal color with varying intensity
+      const minIntensity = 0.25;
+      const scaled = minIntensity + intensity * (1 - minIntensity);
+      return blendWithWhite(baseColor, scaled);
+    }
+    // Default green scale
+    if (intensity < 0.25) return "#c8dfd0";
+    if (intensity < 0.5) return "#8abe9e";
+    if (intensity < 0.75) return "#5a9e78";
+    return "#2d7a50";
+  };
+
+  // Legend colors
+  const legendColors = baseColor
+    ? [0.15, 0.35, 0.55, 0.75, 0.95].map(i => blendWithWhite(baseColor, i))
+    : ["#f0ede8","#c8dfd0","#8abe9e","#5a9e78","#2d7a50"];
+
+  const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y-1); } else setViewMonth(m => m-1); };
+  const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y+1); } else setViewMonth(m => m+1); };
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const expanded = expandedDay ? dayMap[expandedDay] : null;
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <p style={{ fontSize: 13, fontFamily: "DM Sans", fontWeight: 600, color: "#1e1c1a", marginBottom: 12 }}>月曆熱力圖</p>
+
+      {/* Goal filter */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+        <button onClick={() => setFilterGoalId("all")} style={{
+          padding: "5px 12px", borderRadius: 99, border: "1.5px solid",
+          borderColor: filterGoalId === "all" ? "#1e1c1a" : "#e8e4de",
+          background: filterGoalId === "all" ? "#1e1c1a" : "#fff",
+          color: filterGoalId === "all" ? "#fff" : "#888",
+          fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+        }}>全部</button>
+        {goals.map(g => (
+          <button key={g.id} onClick={() => setFilterGoalId(g.id)} style={{
+            padding: "5px 12px", borderRadius: 99, border: "1.5px solid",
+            borderColor: filterGoalId === g.id ? g.color : "#e8e4de",
+            background: filterGoalId === g.id ? g.color : "#fff",
+            color: filterGoalId === g.id ? "#fff" : "#888",
+            fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+          }}>{g.emoji} {g.title}</button>
+        ))}
+      </div>
+
+      {/* Month nav */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button onClick={prevMonth} style={{ background: "none", border: "1.5px solid #e8e4de", borderRadius: 8, padding: "4px 12px", cursor: "pointer", color: "#888", fontSize: 16 }}>‹</button>
+        <span style={{ fontFamily: "DM Sans", fontWeight: 600, color: "#1e1c1a", fontSize: 14 }}>{viewYear}年 {monthNames[viewMonth]}</span>
+        <button onClick={nextMonth} style={{ background: "none", border: "1.5px solid #e8e4de", borderRadius: 8, padding: "4px 12px", cursor: "pointer", color: "#888", fontSize: 16 }}>›</button>
+      </div>
+
+      {/* DOW headers */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 3, marginBottom: 3 }}>
+        {dowNames.map(d => <div key={d} style={{ textAlign: "center", fontSize: 10, color: "#bbb", fontFamily: "DM Sans", fontWeight: 600, padding: "3px 0" }}>{d}</div>)}
+      </div>
+
+      {/* Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 3, marginBottom: 12 }}>
+        {cells.map((day, i) => {
+          if (!day) return <div key={"e"+i} />;
+          const dateStr = `${viewYear}-${String(viewMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+          const data = dayMap[dateStr];
+          const count = data?.count || 0;
+          const isToday = dateStr === todayKey();
+          const isExpanded = expandedDay === dateStr;
+          return (
+            <div key={dateStr} onClick={() => setExpandedDay(isExpanded ? null : dateStr)} style={{
+              aspectRatio: "1", borderRadius: 7, background: getColor(count),
+              display: "flex", alignItems: "center", justifyContent: "center",
+              cursor: count > 0 ? "pointer" : "default",
+              border: isToday ? "2px solid #1e1c1a" : isExpanded ? "2px solid #555" : "2px solid transparent",
+              transition: "all 0.15s", position: "relative"
+            }}>
+              <span style={{ fontSize: 10, fontFamily: "DM Sans", fontWeight: isToday ? 700 : 400, color: count > 0 ? "#fff" : "#c8c4be" }}>{day}</span>
+              {count > 0 && <span style={{ position: "absolute", bottom: 2, right: 3, fontSize: 9, fontFamily: "DM Sans", fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{count}</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
+        <span style={{ fontSize: 10, color: "#aaa", fontFamily: "DM Sans" }}>少</span>
+        {legendColors.map((c, i) => (
+          <div key={i} style={{ width: 14, height: 14, borderRadius: 3, background: c }} />
+        ))}
+        <span style={{ fontSize: 10, color: "#aaa", fontFamily: "DM Sans" }}>多</span>
+      </div>
+
+      {/* Expanded day detail */}
+      {expandedDay && expanded && (
+        <div style={{ background: "#faf9f7", border: "1.5px solid #ede9e3", borderRadius: 14, padding: "12px 14px" }}>
+          <p style={{ fontSize: 12, color: "#888", fontFamily: "DM Sans", fontWeight: 600, marginBottom: 10 }}>{dateLabel(expandedDay)} · {expanded.count} 筆</p>
+          {expanded.entries.map((e, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: i < expanded.entries.length-1 ? "1px solid #ede9e3" : "none" }}>
+              <span style={{ fontSize: 16 }}>{e.goalEmoji}</span>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 12, color: "#555", fontFamily: "DM Sans", fontWeight: 500 }}>
+                  {e.type === "check" ? "✅" : "📝"} {e.actionTitle}
+                </p>
+                {e.text && <p style={{ fontSize: 11, color: "#aaa", fontFamily: "DM Sans", marginTop: 2, lineHeight: 1.5 }}>{e.text.slice(0, 80)}{e.text.length > 80 ? "…" : ""}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {expandedDay && !expanded && (
+        <div style={{ background: "#faf9f7", borderRadius: 14, padding: "12px 14px" }}>
+          <p style={{ fontSize: 12, color: "#ccc", fontFamily: "DM Sans", textAlign: "center" }}>{dateLabel(expandedDay)} 沒有紀錄</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BarChart({ goals }) {
+  const [filterGoalId, setFilterGoalId] = useState("all");
+  const allActions = getAllActionsFlat(goals);
+  const filtered = filterGoalId === "all" ? allActions : allActions.filter(a => a.goalId === filterGoalId);
+
+  // Count check logs + note logs per action
+  const data = filtered
+    .map(a => ({
+      title: a.title,
+      goalColor: a.goalColor,
+      goalEmoji: a.goalEmoji,
+      goalTitle: a.goalTitle,
+      count: (a.logs || []).length,
+      checkCount: (a.logs || []).filter(l => l.type === "check").length,
+      noteCount: (a.logs || []).filter(l => l.type !== "check").length,
+    }))
+    .filter(d => d.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 15);
+
+  const maxCount = Math.max(1, ...data.map(d => d.count));
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <p style={{ fontSize: 13, fontFamily: "DM Sans", fontWeight: 600, color: "#1e1c1a", marginBottom: 12 }}>各行動累積完成次數</p>
+
+      {/* Goal filter */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+        <button onClick={() => setFilterGoalId("all")} style={{
+          padding: "5px 12px", borderRadius: 99, border: "1.5px solid",
+          borderColor: filterGoalId === "all" ? "#1e1c1a" : "#e8e4de",
+          background: filterGoalId === "all" ? "#1e1c1a" : "#fff",
+          color: filterGoalId === "all" ? "#fff" : "#888",
+          fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+        }}>全部</button>
+        {goals.map(g => (
+          <button key={g.id} onClick={() => setFilterGoalId(g.id)} style={{
+            padding: "5px 12px", borderRadius: 99, border: "1.5px solid",
+            borderColor: filterGoalId === g.id ? g.color : "#e8e4de",
+            background: filterGoalId === g.id ? g.color : "#fff",
+            color: filterGoalId === g.id ? "#fff" : "#888",
+            fontSize: 12, fontFamily: "DM Sans", cursor: "pointer"
+          }}>{g.emoji} {g.title}</button>
+        ))}
+      </div>
+
+      {data.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "32px 0" }}>
+          <p style={{ fontSize: 32, marginBottom: 8 }}>📊</p>
+          <p style={{ fontSize: 14, color: "#ccc", fontFamily: "DM Sans" }}>還沒有任何完成紀錄</p>
+          <p style={{ fontSize: 12, color: "#ddd", fontFamily: "DM Sans", marginTop: 4 }}>開始勾選行動或新增筆記後會顯示在這裡</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {data.map((d, i) => (
+            <div key={i}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <span style={{ fontSize: 13 }}>{d.goalEmoji}</span>
+                <p style={{ fontSize: 12, fontFamily: "DM Sans", color: "#444", fontWeight: 500, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</p>
+                <span style={{ fontSize: 12, color: "#888", fontFamily: "DM Sans", fontWeight: 600, flexShrink: 0 }}>{d.count} 次</span>
+              </div>
+              {/* Stacked bar */}
+              <div style={{ height: 10, background: "#f0ede8", borderRadius: 99, overflow: "hidden" }}>
+                <div style={{ display: "flex", height: "100%", width: `${(d.count / maxCount) * 100}%`, borderRadius: 99, overflow: "hidden", transition: "width 0.4s ease" }}>
+                  {d.checkCount > 0 && (
+                    <div style={{ flex: d.checkCount, background: d.goalColor, opacity: 0.85 }} />
+                  )}
+                  {d.noteCount > 0 && (
+                    <div style={{ flex: d.noteCount, background: d.goalColor, opacity: 0.45 }} />
+                  )}
+                </div>
+              </div>
+              {(d.checkCount > 0 && d.noteCount > 0) && (
+                <div style={{ display: "flex", gap: 10, marginTop: 3 }}>
+                  <span style={{ fontSize: 10, color: "#aaa", fontFamily: "DM Sans" }}>✅ 勾選 {d.checkCount}</span>
+                  <span style={{ fontSize: 10, color: "#aaa", fontFamily: "DM Sans" }}>📝 筆記 {d.noteCount}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Records Tab ──────────────────────────────────────────────────────────────
+// ─── Weekly & Monthly Report Helpers ─────────────────────────────────────────
+function getWeekRange(offsetWeeks = 0) {
+  const today = new Date();
+  const dow = today.getDay(); // 0=Sun
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + offsetWeeks * 7);
+  monday.setHours(0, 0, 0, 0);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return { start: monday, end: sunday };
+}
+
+function getMonthRange(offsetMonths = 0) {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth() + offsetMonths, 1);
+  const end = new Date(today.getFullYear(), today.getMonth() + offsetMonths + 1, 0);
+  return { start, end };
+}
+
+function dateInRange(dateStr, start, end) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d >= start && d <= end;
+}
+
+// Count expected appearances of a check action in a date range
+function countExpected(action, start, end) {
+  if (action.type !== "check" || action.achieved) return 0;
+  const freq = action.freq;
+  if (!freq) return 0;
+  let count = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    const dow = cur.getDay();
+    const dom = cur.getDate();
+    const dateStr = cur.toISOString().slice(0, 10);
+    if (freq.type === "daily") count++;
+    else if (freq.type === "alternate") {
+      if (freq.startDate) {
+        const s = new Date(freq.startDate + "T00:00:00");
+        const diff = Math.round((cur - s) / 86400000);
+        if (diff >= 0 && diff % 2 === 0) count++;
+      }
+    }
+    else if (freq.type === "weekly_specific") {
+      if ((freq.days || []).includes(dow)) count++;
+    }
+    else if (freq.type === "weekly_once") {
+      if (dow === 1) count++; // 只在週一計算一次
+    }
+    else if (freq.type === "monthly_once") {
+      if (dom === 1) count++; // 只在1號計算一次
+    }
+    else if (freq.type === "specific_dates") {
+      if ((freq.dates || []).includes(dateStr)) count++;
+    }
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+
+// Count actual completions (check logs) in a date range
+function countActual(action, start, end) {
+  if (action.type !== "check") return 0;
+  return (action.logs || []).filter(l => l.type === "check" && dateInRange(l.date, start, end)).length;
+}
+
+// Calculate completion stats for a goal in a date range
+function calcGoalStats(goal, start, end) {
+  const actionStats = [];
+  goal.branches.forEach(b => {
+    if (b.achieved) return;
+    b.subgoals.forEach(s => {
+      if (s.achieved) return;
+      s.actions.forEach(a => {
+        if (a.type !== "check" || a.achieved) return;
+        const expected = countExpected(a, start, end);
+        const actual = countActual(a, start, end);
+        if (expected > 0) {
+          actionStats.push({ action: a, expected, actual, rate: Math.round((actual / expected) * 100) });
+        }
+      });
+    });
+  });
+  const totalExpected = actionStats.reduce((s, x) => s + x.expected, 0);
+  const totalActual = actionStats.reduce((s, x) => s + x.actual, 0);
+  const rate = totalExpected > 0 ? Math.round((totalActual / totalExpected) * 100) : null;
+  return { rate, totalExpected, totalActual, actionStats };
+}
+
+// ─── Weekly Report ────────────────────────────────────────────────────────────
+function WeeklyReport({ goals }) {
+  const [expandedGoal, setExpandedGoal] = useState(null);
+  const thisWeek = getWeekRange(0);
+  const lastWeek = getWeekRange(-1);
+
+  const fmt = (d) => `${d.getMonth()+1}/${d.getDate()}`;
+  const weekLabel = (r) => `${fmt(r.start)} - ${fmt(r.end)}`;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <p style={{ fontFamily: "DM Sans", fontSize: 13, color: "#aaa" }}>本週：{weekLabel(thisWeek)}</p>
+        <p style={{ fontFamily: "DM Sans", fontSize: 13, color: "#ccc" }}>上週：{weekLabel(lastWeek)}</p>
+      </div>
+
+      {goals.filter(g => !g.achieved).map(goal => {
+        const thisStats = calcGoalStats(goal, thisWeek.start, thisWeek.end);
+        const lastStats = calcGoalStats(goal, lastWeek.start, lastWeek.end);
+        if (thisStats.rate === null && lastStats.rate === null) return null;
+        const isExpanded = expandedGoal === goal.id;
+
+        return (
+          <div key={goal.id} style={{ marginBottom: 12, background: "#fff", borderRadius: 16, border: "1.5px solid #ede9e3", overflow: "hidden" }}>
+            {/* Goal header */}
+            <div onClick={() => setExpandedGoal(isExpanded ? null : goal.id)}
+              style={{ padding: "14px 16px", cursor: "pointer" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>{goal.emoji}</span>
+                  <p style={{ fontFamily: "DM Sans", fontWeight: 600, fontSize: 14, color: "#1e1c1a" }}>{goal.title}</p>
+                </div>
+                <span style={{ color: "#ccc", fontSize: 13 }}>{isExpanded ? "▲" : "▼"}</span>
+              </div>
+              {/* Side by side bars */}
+              <div style={{ display: "flex", gap: 8 }}>
+                {/* This week */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: "#888", fontFamily: "DM Sans" }}>本週</span>
+                    <span style={{ fontSize: 11, fontFamily: "DM Sans", fontWeight: 600, color: goal.color }}>{thisStats.rate !== null ? `${thisStats.rate}%` : "-"}</span>
+                  </div>
+                  <div style={{ height: 8, background: "#f0ede8", borderRadius: 99 }}>
+                    <div style={{ height: "100%", width: `${thisStats.rate || 0}%`, background: goal.color, borderRadius: 99, transition: "width 0.5s" }} />
+                  </div>
+                </div>
+                {/* Last week */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: "#ccc", fontFamily: "DM Sans" }}>上週</span>
+                    <span style={{ fontSize: 11, fontFamily: "DM Sans", color: "#ccc" }}>{lastStats.rate !== null ? `${lastStats.rate}%` : "-"}</span>
+                  </div>
+                  <div style={{ height: 8, background: "#f0ede8", borderRadius: 99 }}>
+                    <div style={{ height: "100%", width: `${lastStats.rate || 0}%`, background: "#d0ccc6", borderRadius: 99 }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Expanded: action details */}
+            {isExpanded && thisStats.actionStats.length > 0 && (
+              <div style={{ borderTop: "1px solid #f0ede8", padding: "12px 16px" }}>
+                {thisStats.actionStats.map(({ action, expected, actual, rate }) => {
+                  const lastAction = lastStats.actionStats.find(x => x.action.id === action.id);
+                  return (
+                    <div key={action.id} style={{ marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <p style={{ fontSize: 12, color: "#555", fontFamily: "DM Sans", flex: 1, marginRight: 8 }}>{action.title}</p>
+                        <p style={{ fontSize: 11, color: "#888", fontFamily: "DM Sans", whiteSpace: "nowrap" }}>{actual}/{expected} 次</p>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ height: 6, background: "#f0ede8", borderRadius: 99 }}>
+                            <div style={{ height: "100%", width: `${rate}%`, background: goal.color, borderRadius: 99 }} />
+                          </div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ height: 6, background: "#f0ede8", borderRadius: 99 }}>
+                            <div style={{ height: "100%", width: `${lastAction?.rate || 0}%`, background: "#d0ccc6", borderRadius: 99 }} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Monthly Report ───────────────────────────────────────────────────────────
+function MonthlyReport({ goals }) {
+  const [expandedGoal, setExpandedGoal] = useState(null);
+  const thisMonth = getMonthRange(0);
+  const lastMonth = getMonthRange(-1);
+  const monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+
+  const thisLabel = `${new Date().getFullYear()}年 ${monthNames[new Date().getMonth()]}`;
+  const lastDate = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+  const lastLabel = `${lastDate.getFullYear()}年 ${monthNames[lastDate.getMonth()]}`;
+
+  const activeGoals = goals.filter(g => !g.achieved);
+  const goalStats = activeGoals.map(g => ({ goal: g, stats: calcGoalStats(g, thisMonth.start, thisMonth.end) }))
+    .filter(x => x.stats.rate !== null);
+  const totalActual = goalStats.reduce((s, x) => s + x.stats.totalActual, 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+        <p style={{ fontFamily: "DM Sans", fontSize: 13, color: "#aaa" }}>{thisLabel}</p>
+        <p style={{ fontFamily: "DM Sans", fontSize: 13, color: "#ccc" }}>{lastLabel}</p>
+      </div>
+
+      {/* Investment proportion */}
+      {totalActual > 0 && (
+        <div style={{ background: "#fff", borderRadius: 16, border: "1.5px solid #ede9e3", padding: "14px 16px", marginBottom: 14 }}>
+          <p style={{ fontFamily: "DM Sans", fontSize: 12, fontWeight: 600, color: "#888", marginBottom: 12 }}>本月投入比例</p>
+          {goalStats.map(({ goal, stats }) => {
+            const pct = totalActual > 0 ? Math.round((stats.totalActual / totalActual) * 100) : 0;
+            return (
+              <div key={goal.id} style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 12, fontFamily: "DM Sans", color: "#555" }}>{goal.emoji} {goal.title}</span>
+                  <span style={{ fontSize: 11, fontFamily: "DM Sans", color: goal.color, fontWeight: 600 }}>{pct}%</span>
+                </div>
+                <div style={{ height: 8, background: "#f0ede8", borderRadius: 99 }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: goal.color, borderRadius: 99, transition: "width 0.5s" }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Per goal completion */}
+      {activeGoals.filter(g => !g.achieved).map(goal => {
+        const thisStats = calcGoalStats(goal, thisMonth.start, thisMonth.end);
+        const lastStats = calcGoalStats(goal, lastMonth.start, lastMonth.end);
+        if (thisStats.rate === null && lastStats.rate === null) return null;
+        const isExpanded = expandedGoal === goal.id;
+
+        return (
+          <div key={goal.id} style={{ marginBottom: 12, background: "#fff", borderRadius: 16, border: "1.5px solid #ede9e3", overflow: "hidden" }}>
+            <div onClick={() => setExpandedGoal(isExpanded ? null : goal.id)} style={{ padding: "14px 16px", cursor: "pointer" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>{goal.emoji}</span>
+                  <p style={{ fontFamily: "DM Sans", fontWeight: 600, fontSize: 14, color: "#1e1c1a" }}>{goal.title}</p>
+                </div>
+                <span style={{ color: "#ccc", fontSize: 13 }}>{isExpanded ? "▲" : "▼"}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: "#888", fontFamily: "DM Sans" }}>本月</span>
+                    <span style={{ fontSize: 11, fontFamily: "DM Sans", fontWeight: 600, color: goal.color }}>{thisStats.rate !== null ? `${thisStats.rate}%` : "-"}</span>
+                  </div>
+                  <div style={{ height: 8, background: "#f0ede8", borderRadius: 99 }}>
+                    <div style={{ height: "100%", width: `${thisStats.rate || 0}%`, background: goal.color, borderRadius: 99, transition: "width 0.5s" }} />
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: "#ccc", fontFamily: "DM Sans" }}>上月</span>
+                    <span style={{ fontSize: 11, fontFamily: "DM Sans", color: "#ccc" }}>{lastStats.rate !== null ? `${lastStats.rate}%` : "-"}</span>
+                  </div>
+                  <div style={{ height: 8, background: "#f0ede8", borderRadius: 99 }}>
+                    <div style={{ height: "100%", width: `${lastStats.rate || 0}%`, background: "#d0ccc6", borderRadius: 99 }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {isExpanded && thisStats.actionStats.length > 0 && (
+              <div style={{ borderTop: "1px solid #f0ede8", padding: "12px 16px" }}>
+                {thisStats.actionStats.map(({ action, expected, actual, rate }) => {
+                  const lastAction = lastStats.actionStats.find(x => x.action.id === action.id);
+                  return (
+                    <div key={action.id} style={{ marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <p style={{ fontSize: 12, color: "#555", fontFamily: "DM Sans", flex: 1, marginRight: 8 }}>{action.title}</p>
+                        <p style={{ fontSize: 11, color: "#888", fontFamily: "DM Sans", whiteSpace: "nowrap" }}>{actual}/{expected} 次</p>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ height: 6, background: "#f0ede8", borderRadius: 99 }}>
+                            <div style={{ height: "100%", width: `${rate}%`, background: goal.color, borderRadius: 99 }} />
+                          </div>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ height: 6, background: "#f0ede8", borderRadius: 99 }}>
+                            <div style={{ height: "100%", width: `${lastAction?.rate || 0}%`, background: "#d0ccc6", borderRadius: 99 }} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RecordsTab({ goals, onUpdateLog, onDeleteLog }) {
+  const [mode, setMode] = useState("date"); // "date" | "action" | "stats" | "weekly" | "monthly" | "achievements"
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [viewLog, setViewLog] = useState(null);
+
+  const allActions = getAllActionsFlat(goals);
+  // Only show actions that have text-based note logs (not check logs)
+  const actionsWithLogs = allActions.filter(a => a.logs && a.logs.some(l => l.type !== "check" && l.text));
+
+  // Build date map — only note logs (type !== "check") + done entries
+  const dateMap = {};
+  allActions.forEach(action => {
+    (action.logs || []).forEach(log => {
+      if (log.type === "check") return; // skip check logs in date view
+      if (!dateMap[log.date]) dateMap[log.date] = [];
+      dateMap[log.date].push({ ...log, action });
+    });
+    if (action.done || action.achieved) {
+      const key = todayKey();
+      if (!dateMap[key]) dateMap[key] = [];
+      if (!dateMap[key].find(e => e.actionId === action.id && e.type === "done")) {
+        dateMap[key].push({ id: "done_" + action.id, type: "done", action, date: key });
+      }
+    }
+  });
+
+  const sortedDates = Object.keys(dateMap).sort((a, b) => b.localeCompare(a));
+
+  // Logs for selected action filter — only note logs
+  const filteredLogs = selectedAction
+    ? [...(allActions.find(a => a.id === selectedAction)?.logs || []).filter(l => l.type !== "check" && l.text)].reverse()
+    : [];
+  const filteredAction = allActions.find(a => a.id === selectedAction);
+
+  return (
+    <div style={{ padding: "0 20px 100px" }}>
+      <div style={{ paddingTop: 60, paddingBottom: 20 }}>
+        <h1 style={{ fontFamily: "DM Serif Display, serif", fontSize: 30, color: "#1e1c1a", fontWeight: 400, marginBottom: 16 }}>紀錄</h1>
+        {/* Mode toggle - 3 rows */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", background: "#f0ede8", borderRadius: 12, padding: 3 }}>
+            {[["date", "📅 日期"], ["action", "🔍 行動"]].map(([k, v]) => (
+              <button key={k} onClick={() => setMode(k)} style={{
+                flex: 1, padding: "9px 4px", borderRadius: 10, border: "none",
+                background: mode === k ? "#fff" : "transparent",
+                color: mode === k ? "#1e1c1a" : "#aaa",
+                fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer",
+                boxShadow: mode === k ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
+                transition: "all 0.2s"
+              }}>{v}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", background: "#f0ede8", borderRadius: 12, padding: 3 }}>
+            {[["stats", "📊 統計"], ["weekly", "📆 週報"], ["monthly", "🗓️ 月報"]].map(([k, v]) => (
+              <button key={k} onClick={() => setMode(k)} style={{
+                flex: 1, padding: "9px 4px", borderRadius: 10, border: "none",
+                background: mode === k ? "#fff" : "transparent",
+                color: mode === k ? "#1e1c1a" : "#aaa",
+                fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer",
+                boxShadow: mode === k ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
+                transition: "all 0.2s"
+              }}>{v}</button>
+            ))}
+          </div>
+          <div style={{ display: "flex", background: "#f0ede8", borderRadius: 12, padding: 3 }}>
+            {[["achievements", "🏆 成就"]].map(([k, v]) => (
+              <button key={k} onClick={() => setMode(k)} style={{
+                flex: 1, padding: "9px 4px", borderRadius: 10, border: "none",
+                background: mode === k ? "#fff" : "transparent",
+                color: mode === k ? "#1e1c1a" : "#aaa",
+                fontSize: 12, fontFamily: "DM Sans", fontWeight: 600, cursor: "pointer",
+                boxShadow: mode === k ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
+                transition: "all 0.2s"
+              }}>{v}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* DATE MODE */}
+      {mode === "date" && (
+        sortedDates.length === 0 ? (
+          <div style={{ textAlign: "center", paddingTop: 60, color: "#ccc" }}>
+            <p style={{ fontSize: 40, marginBottom: 12 }}>📋</p>
+            <p style={{ fontFamily: "DM Sans", fontSize: 15 }}>還沒有任何紀錄</p>
+          </div>
+        ) : sortedDates.map(dateKey => {
+          const entries = dateMap[dateKey];
+          const doneEntries = entries.filter(e => e.type === "done");
+          const logEntries = entries.filter(e => e.type !== "done");
+          return (
+            <div key={dateKey} style={{ marginBottom: 28 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <p style={{ fontSize: 13, color: "#666", fontFamily: "DM Sans", fontWeight: 600, whiteSpace: "nowrap" }}>{dateLabel(dateKey)}</p>
+                <div style={{ flex: 1, height: 1, background: "#ede9e3" }} />
+              </div>
+              {doneEntries.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <p style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>完成的任務</p>
+                  {doneEntries.map(entry => (
+                    <div key={entry.id} style={{ background: "#fff", border: "1.5px solid #ede9e3", borderRadius: 14, padding: "12px 14px", marginBottom: 6, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 20, height: 20, borderRadius: 6, background: entry.action.goalColor, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <span style={{ color: "#fff", fontSize: 11 }}>✓</span>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontFamily: "DM Sans", fontSize: 14, color: "#777", textDecoration: "line-through", marginBottom: 4 }}>{entry.action.title}</p>
+                        <Tag color={entry.action.goalColor} emoji={entry.action.goalEmoji} title={entry.action.goalTitle} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {logEntries.length > 0 && (
+                <div>
+                  <p style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>筆記紀錄</p>
+                  {logEntries.map(entry => (
+                    <div key={entry.id} onClick={() => setViewLog({ log: entry, action: entry.action })} style={{
+                      background: "#fff", border: "1.5px solid #ede9e3", borderRadius: 14,
+                      padding: "14px 16px", marginBottom: 8, cursor: "pointer"
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                        <Tag color={entry.action.goalColor} emoji={entry.action.goalEmoji} title={entry.action.goalTitle} />
+                        <span style={{ fontSize: 12, color: "#bbb", fontFamily: "DM Sans" }}>· {entry.action.title}</span>
+                      </div>
+                      <p style={{
+                        fontFamily: "DM Sans", fontSize: 14, color: "#444", lineHeight: 1.6,
+                        overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical"
+                      }}>{entry.text}</p>
+                      <p style={{ fontSize: 11, color: entry.action.goalColor, fontFamily: "DM Sans", fontWeight: 600, marginTop: 6 }}>查看全文 →</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+
+      {/* ACTION FILTER MODE */}
+      {mode === "action" && (
+        <div>
+          {/* Action selector */}
+          <div style={{ marginBottom: 20 }}>
+            <p style={{ fontSize: 12, color: "#aaa", fontFamily: "DM Sans", marginBottom: 10 }}>選擇行動查看紀錄</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {actionsWithLogs.length === 0 ? (
+                <p style={{ fontSize: 14, color: "#ccc", fontFamily: "DM Sans", textAlign: "center", paddingTop: 40 }}>還沒有任何筆記紀錄</p>
+              ) : actionsWithLogs.map(action => (
+                <div key={action.id} onClick={() => setSelectedAction(selectedAction === action.id ? null : action.id)} style={{
+                  background: selectedAction === action.id ? "#1e1c1a" : "#fff",
+                  border: "1.5px solid", borderColor: selectedAction === action.id ? "#1e1c1a" : "#ede9e3",
+                  borderRadius: 14, padding: "12px 16px", cursor: "pointer", transition: "all 0.2s"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <p style={{ fontFamily: "DM Sans", fontSize: 14, fontWeight: 500, color: selectedAction === action.id ? "#fff" : "#1e1c1a" }}>
+                        {action.title}
+                        {action.type === "note" && <span style={{ marginLeft: 4, fontSize: 11 }}>📝</span>}
+                      </p>
+                      <Tag color={action.goalColor} emoji={action.goalEmoji} title={action.goalTitle} />
+                    </div>
+                    <span style={{ fontSize: 12, fontFamily: "DM Sans", color: selectedAction === action.id ? "#aaa" : "#bbb" }}>{action.logs.filter(l => l.type !== "check" && l.text).length} 筆</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Selected action logs */}
+          {selectedAction && filteredAction && (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                <p style={{ fontSize: 13, color: "#666", fontFamily: "DM Sans", fontWeight: 600 }}>{filteredAction.title} 的所有紀錄</p>
+                <div style={{ flex: 1, height: 1, background: "#ede9e3" }} />
+              </div>
+              {filteredLogs.map(log => (
+                <div key={log.id} onClick={() => setViewLog({ log, action: filteredAction })} style={{
+                  background: "#fff", border: "1.5px solid #ede9e3", borderRadius: 14,
+                  padding: "14px 16px", marginBottom: 10, cursor: "pointer"
+                }}>
+                  <p style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>{dateLabel(log.date)}</p>
+                  <p style={{
+                    fontFamily: "DM Sans", fontSize: 14, color: "#444", lineHeight: 1.6,
+                    overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical"
+                  }}>{log.text}</p>
+                  <p style={{ fontSize: 11, color: filteredAction.goalColor, fontFamily: "DM Sans", fontWeight: 600, marginTop: 6 }}>查看全文 →</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* STATS TAB */}
+      {mode === "stats" && (
+        <div>
+          <HeatmapCalendar goals={goals} />
+          <div style={{ height: 1, background: "#ede9e3", marginBottom: 24 }} />
+          <BarChart goals={goals} />
+        </div>
+      )}
+
+      {/* WEEKLY REPORT */}
+      {mode === "weekly" && <WeeklyReport goals={goals} />}
+
+      {/* MONTHLY REPORT */}
+      {mode === "monthly" && <MonthlyReport goals={goals} />}
+
+      {/* ACHIEVEMENTS TAB */}
+      {mode === "achievements" && (() => {
+        const allUnlocked = [];
+        goals.forEach(g => {
+          g.branches.forEach(b => {
+            b.subgoals.forEach(s => {
+              (s.rewards || []).filter(r => r.unlockedAt).forEach(r => {
+                allUnlocked.push({ reward: r, subgoalTitle: s.title, goalTitle: g.title, goalColor: g.color, goalEmoji: g.emoji });
+              });
+            });
+          });
+        });
+        allUnlocked.sort((a, b) => b.reward.unlockedAt.localeCompare(a.reward.unlockedAt));
+
+        return allUnlocked.length === 0 ? (
+          <div style={{ textAlign: "center", paddingTop: 60, color: "#ccc" }}>
+            <p style={{ fontSize: 48, marginBottom: 12 }}>🏆</p>
+            <p style={{ fontFamily: "DM Sans", fontSize: 15 }}>還沒有解鎖任何成就</p>
+            <p style={{ fontFamily: "DM Sans", fontSize: 13, marginTop: 6, color: "#ddd", lineHeight: 1.6 }}>
+              在小目標裡設定小禮物<br />持續完成行動就會解鎖！
+            </p>
+          </div>
+        ) : (
+          <div>
+            <p style={{ fontSize: 13, color: "#aaa", fontFamily: "DM Sans", marginBottom: 16 }}>已解鎖 {allUnlocked.length} 個成就</p>
+            {allUnlocked.map((item, i) => (
+              <div key={i} style={{
+                background: "#fff", border: "1.5px solid #e8e4de", borderRadius: 20,
+                padding: "16px 18px", marginBottom: 12,
+                boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
+                display: "flex", alignItems: "center", gap: 14
+              }}>
+                <div style={{
+                  width: 56, height: 56, borderRadius: 16, background: "#faf9f7",
+                  border: "1.5px solid #ede9e3", display: "flex", alignItems: "center",
+                  justifyContent: "center", flexShrink: 0, fontSize: 28
+                }}>{item.reward.emoji || "🎀"}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontFamily: "DM Serif Display, serif", fontSize: 16, color: "#1e1c1a", marginBottom: 4, lineHeight: 1.3 }}>{item.reward.text}</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <Tag color={item.goalColor} emoji={item.goalEmoji} title={item.goalTitle} />
+                    <span style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans" }}>· {item.subgoalTitle}</span>
+                  </div>
+                  <p style={{ fontSize: 11, color: "#bbb", fontFamily: "DM Sans", marginTop: 4 }}>
+                    {item.reward.type === "milestone" ? `累積 ${item.reward.threshold} 天 · ` : "完成目標 · "}
+                    解鎖於 {shortDate(item.reward.unlockedAt)}
+                  </p>
+                </div>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>🏆</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* Log detail overlay */}
+      {viewLog && (
+        <LogDetailModal
+          log={viewLog.log}
+          actionTitle={viewLog.action.title}
+          goalColor={viewLog.action.goalColor}
+          goalEmoji={viewLog.action.goalEmoji}
+          goalTitle={viewLog.action.goalTitle}
+          onClose={() => setViewLog(null)}
+          onSave={(logId, newText) => { onUpdateLog(viewLog.action, logId, newText); setViewLog(prev => prev ? { ...prev, log: { ...prev.log, text: newText } } : null); }}
+          onDelete={(logId) => { onDeleteLog(viewLog.action, logId); setViewLog(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+function App({ goals, setGoals, user, onSignOut }) {
+  const [tab, setTab] = useState("today");
+  const [showSearch, setShowSearch] = useState(false);
+  const [showDownload, setShowDownload] = useState(false);
+  const [searchOpenLog, setSearchOpenLog] = useState(null);
+  const [pendingReward, setPendingReward] = useState(null);
+
+  useEffect(() => {
+    // Load fonts
+    if (!document.getElementById('gp-fonts')) {
+      const link = document.createElement("link");
+      link.id = 'gp-fonts';
+      link.rel = "stylesheet";
+      link.href = "https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap";
+      document.head.appendChild(link);
+    }
+  }, []);
+
+
+
+  const updateGoal = (updated) => setGoals(prev => prev.map(g => g.id === updated.id ? updated : g));
+  const addGoal = (newGoal) => setGoals(prev => [...prev, newGoal]);
+  const deleteGoal = (goalId) => setGoals(prev => prev.filter(g => g.id !== goalId));
+
+  const importGoals = (imported) => {
+    setGoals(prev => {
+      const existingIds = new Set(prev.map(g => g.id));
+      const newGoals = imported.filter(g => !existingIds.has(g.id));
+      return [...prev, ...newGoals];
+    });
+  };
+
+  const toggleAction = (action) => {
+    setGoals(prev => {
+      // Calculate old active days for this subgoal before update
+      let oldSub = null;
+      prev.forEach(g => g.branches.forEach(b => b.subgoals.forEach(s => {
+        if (s.actions.some(a => a.id === action.id)) oldSub = s;
+      })));
+      const oldDays = oldSub ? getSubgoalActiveDays(oldSub) : 0;
+
+      const next = updateActionInGoals(prev, action.goalId, action.branchId, action.subgoalId, action.id, a => {
+        const newDone = !a.done;
+        const today = todayKey();
+        let logs = a.logs || [];
+        if (newDone) {
+          const alreadyLogged = logs.some(l => l.type === "check" && l.date === today);
+          if (!alreadyLogged) logs = [...logs, { id: "chk_" + genId(), date: today, type: "check", text: "" }];
+        } else {
+          logs = logs.filter(l => !(l.type === "check" && l.date === today));
+        }
+        return { ...a, done: newDone, logs };
+      });
+
+      // After update, recalculate days and check rewards
+      if (oldSub) {
+        let newSub = null;
+        next.forEach(g => g.branches.forEach(b => b.subgoals.forEach(s => {
+          if (s.id === oldSub.id) newSub = s;
+        })));
+        if (newSub) {
+          const newDays = getSubgoalActiveDays(newSub);
+          const unlocked = checkNewlyUnlocked(newSub.rewards, oldDays, newDays);
+          if (unlocked) {
+            // Mark reward as unlocked and queue modal
+            setTimeout(() => setPendingReward({ reward: unlocked, subgoalTitle: newSub.title, subgoalId: newSub.id }), 300);
+            // Persist unlockedAt
+            return next.map(g => ({
+              ...g, branches: g.branches.map(b => ({
+                ...b, subgoals: b.subgoals.map(s => s.id === newSub.id ? {
+                  ...s, rewards: (s.rewards || []).map(r => r.id === unlocked.id ? { ...r, unlockedAt: todayKey() } : r)
+                } : s)
+              }))
+            }));
+          }
+        }
+      }
+      return next;
+    });
+  };
+  const saveLog = (action, log) => setGoals(prev => updateActionInGoals(prev, action.goalId, action.branchId, action.subgoalId, action.id, a => ({ ...a, logs: [...(a.logs || []), log] })));
+  const updateLog = (action, logId, newText) => setGoals(prev => updateActionInGoals(prev, action.goalId, action.branchId, action.subgoalId, action.id, a => ({ ...a, logs: a.logs.map(l => l.id === logId ? { ...l, text: newText } : l) })));
+  const deleteLog = (action, logId) => setGoals(prev => updateActionInGoals(prev, action.goalId, action.branchId, action.subgoalId, action.id, a => ({ ...a, logs: a.logs.filter(l => l.id !== logId) })));
+
+  // Shared top-right icons rendered per tab in a fixed overlay
+  const TopIcons = () => (
+    <div style={{ position: "fixed", top: 0, right: "max(0px, calc(50vw - 240px))", zIndex: 40, display: "flex", gap: 8, padding: "16px 20px" }}>
+      <button onClick={() => setShowSearch(true)} style={{ background: "rgba(250,249,247,0.9)", border: "1.5px solid #e8e4de", borderRadius: 10, padding: "6px 10px", cursor: "pointer", fontSize: 16, backdropFilter: "blur(8px)" }}>🔍</button>
+      <button onClick={() => setShowDownload(true)} style={{ background: "rgba(250,249,247,0.9)", border: "1.5px solid #e8e4de", borderRadius: 10, padding: "6px 10px", cursor: "pointer", fontSize: 16, backdropFilter: "blur(8px)" }}>⬇️</button>
+      {onSignOut && <button onClick={onSignOut} title={user?.displayName || "登出"} style={{ background: "rgba(250,249,247,0.9)", border: "1.5px solid #e8e4de", borderRadius: 10, padding: "6px 10px", cursor: "pointer", fontSize: 16, backdropFilter: "blur(8px)" }}>👤</button>}
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#faf9f7", position: "relative" }}>
+      <TopIcons />
+      {tab === "today" && <TodayTab goals={goals} onToggleAction={toggleAction} onSaveLog={saveLog} onUpdateLog={updateLog} onDeleteLog={deleteLog} />}
+      {tab === "goals" && <GoalsTab goals={goals} onUpdateGoal={updateGoal} onAddGoal={addGoal} onDeleteGoal={deleteGoal} onSaveLog={saveLog} onUpdateLog={updateLog} onDeleteLog={deleteLog} onToggleAction={toggleAction} onSearchOpen={() => setShowSearch(true)} onDownloadOpen={() => setShowDownload(true)} onTriggerReward={(reward, subgoalTitle) => setPendingReward({ reward, subgoalTitle })} />}
+      {tab === "records" && <RecordsTab goals={goals} onUpdateLog={updateLog} onDeleteLog={deleteLog} />}
+
+      {/* Gift Modal */}
+      {pendingReward && (
+        <GiftModal
+          reward={pendingReward.reward}
+          subgoalTitle={pendingReward.subgoalTitle}
+          onClose={() => setPendingReward(null)}
+        />
+      )}
+
+      {/* Bottom Nav */}
+      <div style={{
+        position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+        width: "100%", maxWidth: 480,
+        background: "rgba(250,249,247,0.94)", backdropFilter: "blur(16px)",
+        borderTop: "1px solid #ede9e3", display: "flex", padding: "12px 0 24px"
+      }}>
+        {[
+          { key: "today", icon: "✅", label: "待辦" },
+          { key: "goals", icon: "🎯", label: "目標" },
+          { key: "records", icon: "📓", label: "紀錄" },
+        ].map(({ key, icon, label }) => (
+          <button key={key} onClick={() => setTab(key)} style={{
+            flex: 1, background: "none", border: "none", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: 0
+          }}>
+            <span style={{ fontSize: 22 }}>{icon}</span>
+            <span style={{ fontSize: 11, fontFamily: "DM Sans", fontWeight: 600, color: tab === key ? "#1e1c1a" : "#bbb", letterSpacing: 0.3, transition: "color 0.2s" }}>{label}</span>
+            {tab === key && <div style={{ width: 4, height: 4, borderRadius: 99, background: "#1e1c1a", marginTop: 1 }} />}
+          </button>
+        ))}
+      </div>
+
+      {showSearch && (
+        <SearchModal goals={goals} onClose={() => setShowSearch(false)} onOpenLog={(action, log) => { setSearchOpenLog({ action, log }); setShowSearch(false); }} />
+      )}
+      {showDownload && <DownloadSheet goals={goals} onClose={() => setShowDownload(false)} onImport={importGoals} />}
+      {searchOpenLog && (
+        <LogModal
+          action={searchOpenLog.action}
+          onClose={() => setSearchOpenLog(null)}
+          onSaveLog={saveLog}
+          onUpdateLog={updateLog}
+          onDeleteLog={deleteLog}
+          onToggleDone={toggleAction}
+        />
+      )}
+    </div>
+  );
+}
+
+
+    // ─── Root with Auth ───────────────────────────────────────────────────────
+    function Root() {
+      const [authState, setAuthState] = useState("loading");
+      const [user, setUser] = useState(null);
+      const [goals, setGoals] = useState(null);
+      const [loginError, setLoginError] = useState("");
+      const saveTimeout = useRef(null);
+
+      useEffect(() => {
+        const unsub = auth.onAuthStateChanged(async (u) => {
+          if (u) {
+            setUser(u);
+            setAuthState("loadingData");
+            const saved = await loadGoalsFromFirestore(u.uid);
+            if (saved) {
+              setGoals(applyDailyReset(saved));
+            } else {
+              setGoals(INITIAL_GOALS);
+              // 新帳號，立即儲存初始資料到 Firebase
+              saveGoalsToFirestore(u.uid, INITIAL_GOALS);
+            }
+            setAuthState("loggedIn");
+          } else {
+            setUser(null);
+            setGoals(null);
+            setAuthState("loggedOut");
+          }
+        });
+        return () => unsub();
+      }, []);
+
+      useEffect(() => {
+        if (!user || !goals || authState !== "loggedIn") return;
+        if (saveTimeout.current) clearTimeout(saveTimeout.current);
+        saveTimeout.current = setTimeout(() => {
+          saveGoalsToFirestore(user.uid, goals);
+        }, 1500);
+        return () => clearTimeout(saveTimeout.current);
+      }, [goals, user, authState]);
+
+      const handleLogin = async (password) => {
+        setLoginError("");
+        try {
+          await auth.signInWithEmailAndPassword("judy.860830@hotmail.com", password);
+        } catch(e) {
+          console.error("Login error:", e.code);
+          if (e.code === "auth/wrong-password" || e.code === "auth/invalid-credential") {
+            setLoginError("密碼錯誤，請再試一次");
+          } else if (e.code === "auth/too-many-requests") {
+            setLoginError("嘗試次數過多，請稍後再試");
+          } else {
+            setLoginError("登入失敗：" + e.code);
+          }
+        }
+      };
+
+      const handleSignOut = async () => { await auth.signOut(); };
+
+      if (authState === "loading" || authState === "loadingData") {
+        return <LoadingScreen message={authState === "loadingData" ? "正在載入你的目標..." : "載入中..."} />;
+      }
+      if (authState === "loggedOut") {
+        return <LoginScreen onLogin={handleLogin} error={loginError} />;
+      }
+      return <App goals={goals} setGoals={setGoals} user={user} onSignOut={handleSignOut} />;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(
+      React.createElement(React.StrictMode, null, React.createElement(Root, null))
+    );
+  </script>
+</body>
+</html>
