@@ -2323,10 +2323,9 @@ function Root() {
         const saved = await loadFromFirestore(u.uid);
 
         if (saved === undefined) {
-          // 讀取失敗 → 絕對不寫任何東西，顯示錯誤
+          // 讀取失敗 → 絕對不寫任何東西，保持 goals 為 null 不觸發存檔
           console.error("讀取失敗，請重新整理");
-          setGoals([]);
-          setAuthState("loggedIn");
+          setAuthState("error");
           return;
         }
 
@@ -2392,6 +2391,14 @@ function Root() {
 
   if (authState==="loading"||authState==="loadingData") return <LoadingScreen message={authState==="loadingData"?"正在載入你的目標...":"載入中..."}/>;
   if (authState==="loggedOut") return <LoginScreen onLogin={handleLogin} error={loginError}/>;
+  if (authState==="error") return (
+    <div className="fb-loading">
+      <p style={{ fontSize:40, marginBottom:12 }}>⚠️</p>
+      <p style={{ fontFamily:"DM Serif Display, serif", fontSize:20, color:"#1e1c1a", fontWeight:400, marginBottom:8 }}>讀取失敗</p>
+      <p style={{ fontFamily:"DM Sans", fontSize:13, color:"#aaa", marginBottom:24, textAlign:"center", lineHeight:1.6 }}>無法連接到伺服器<br/>請確認網路後重新整理</p>
+      <button onClick={()=>window.location.reload()} style={{ padding:"12px 28px", borderRadius:14, border:"none", background:"#1e1c1a", color:"#fff", fontSize:15, fontFamily:"DM Sans", fontWeight:600, cursor:"pointer" }}>重新整理</button>
+    </div>
+  );
   return <App goals={goals||[]} setGoals={setGoals} user={user} onSignOut={handleSignOut} saveStatus={saveStatus}/>;
 }
 
