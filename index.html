@@ -62,7 +62,7 @@ async function loadFromFirestore(uid) {
     const snap = await db.collection("users").doc(uid).collection("data").doc("goals").get();
     if (!snap.exists) return null;
     const data = snap.data();
-    if (Array.isArray(data.goals)) return data.goals;
+    if (Array.isArray(data.goals) && data.goals.length > 0) return data.goals;
     return null;
   } catch(e) {
     console.error("Firebase 讀取失敗:", e.code, e.message);
