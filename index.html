@@ -349,6 +349,25 @@ const INITIAL_GOALS = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 function downloadText(filename, content) {
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isIOS) {
+    // iOS：複製到剪貼簿
+    navigator.clipboard.writeText(content).then(() => {
+      alert("已複製到剪貼簿！\n請貼到備忘錄或其他 App 儲存。\n\n檔案名稱：" + filename);
+    }).catch(() => {
+      // clipboard API 失敗時，顯示文字讓用戶手動複製
+      const ta = document.createElement("textarea");
+      ta.value = content;
+      ta.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;font-size:12px;padding:16px;box-sizing:border-box;background:#fff;";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      alert("請全選並複製後，貼到備忘錄儲存。\n關閉提示後請長按全選。");
+      ta.addEventListener("blur", () => document.body.removeChild(ta));
+    });
+    return;
+  }
+  // 電腦：正常下載
   try {
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -357,17 +376,14 @@ function downloadText(filename, content) {
     a.download = filename;
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
   } catch(e) {
-    // iOS Safari fallback：開新分頁顯示內容，長按可儲存
-    const w = window.open("", "_blank");
-    if (w) {
-      w.document.write("<pre style='font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap'>" + content.replace(/&/g,"&amp;").replace(/</g,"&lt;") + "</pre>");
-      w.document.title = filename;
-    }
+    const a = document.createElement("a");
+    a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(content);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 }
 
