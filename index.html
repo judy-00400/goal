@@ -349,12 +349,26 @@ const INITIAL_GOALS = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 function downloadText(filename, content) {
-  const a = document.createElement("a");
-  a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(content);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  try {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+  } catch(e) {
+    // iOS Safari fallback：開新分頁顯示內容，長按可儲存
+    const w = window.open("", "_blank");
+    if (w) {
+      w.document.write("<pre style='font-family:monospace;font-size:13px;padding:16px;white-space:pre-wrap'>" + content.replace(/&/g,"&amp;").replace(/</g,"&lt;") + "</pre>");
+      w.document.title = filename;
+    }
+  }
 }
 
 function exportCSV(goals) {
